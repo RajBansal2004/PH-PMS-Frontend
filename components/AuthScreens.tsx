@@ -1,55 +1,715 @@
 "use client";
+
 import Link from "next/link";
-import { useState } from "react";
-import { ArrowRight, Check, ChevronDown, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck, Smartphone, Timer, AlertTriangle, CheckCircle2, XCircle, KeyRound } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import {
+  ArrowRight,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+} from "lucide-react";
+
 import { ApiError } from "../lib/api";
 import { useAuth } from "./AuthProvider";
-function Logo(){return <div className="auth-logo"><div className="brand-mark"><span>✣</span></div><b>Pehal<br/>Healthcare<br/>Technologies</b></div>}
-function AuthLayout({children,title="Welcome Back!",sub="Please sign in to continue to your account."}:{children:React.ReactNode;title?:string;sub?:string}){return <div className="auth-page"><div className="auth-showcase"><Logo/><div className="showcase-copy"><h1>One Platform.<br/>Complete Project<br/>Excellence.</h1><p>Plan. Track. Collaborate. Deliver.</p></div><div className="showcase-art"><div className="screen-card">▦<br/><small>Projects</small></div><div className="screen-card second">◫<br/><small>Analytics</small></div><div className="screen-card third">◉<br/><small>Delivery</small></div></div><div className="trusted">Trusted by teams to deliver successful<br/>projects, every time.</div></div><div className="auth-panel"><div className="auth-card"><div className="lang">EN <ChevronDown size={12}/></div><Logo/><h2>{title}</h2><p className="auth-sub">{sub}</p>{children}<footer>Privacy Policy &nbsp; • &nbsp; Terms of Use &nbsp; • &nbsp; Support<br/><span>© 2025 Pehal Healthcare Technologies. All rights reserved.</span></footer></div></div></div>}
-export function LoginScreen(){
- const { signIn, signingIn, user } = useAuth();
- const [email,setEmail]=useState("");
- const [pass,setPass]=useState("");
- const [remember,setRemember]=useState(false);
- const [show,setShow]=useState(false);
- const [error,setError]=useState("");
- const [fieldError,setFieldError]=useState("");
- const submit=async(e:React.FormEvent)=>{
-  e.preventDefault(); setError(""); setFieldError("");
-  const normalized=email.trim().toLowerCase();
-  if(!normalized){setFieldError("Please enter your work email.");return;}
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)){setFieldError("Please enter a valid work email address.");return;}
-  if(!pass){setError("Please enter your password.");return;}
-  try{
-   const u=await signIn(normalized,pass,remember);
-   const params=new URLSearchParams(window.location.search);
-   const next=params.get("next");
-   if(u.organizationId) window.location.replace(next || "/dashboard");
-   else window.location.replace("/organization/setup");
-  }catch(err:any){
-   const status=err instanceof ApiError ? err.status : 0;
-   if(status===401) setError("Invalid email or password. Please try again.");
-   else if(status===423) setError("Your account is temporarily locked. Please try again later or contact your administrator.");
-   else if(status===403) setError(err.message || "Your account does not have access to PH-PMS.");
-   else setError(err.message || "Unable to sign in. Please try again.");
-  }
- };
- if(user) return null;
- return <AuthLayout><form className="auth-form" onSubmit={submit} noValidate>
-  <label>Work Email <b>*</b><div className={`input-wrap ${fieldError?"has-error":""}`}><Mail size={15}/><input autoComplete="username" inputMode="email" value={email} onChange={e=>{setEmail(e.target.value);setFieldError("")}} placeholder="Enter your work email" aria-invalid={!!fieldError}/></div>{fieldError&&<small className="field-error">{fieldError}</small>}</label>
-  <label>Password <b>*</b><div className="input-wrap"><LockKeyhole size={15}/><input autoComplete="current-password" type={show?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} placeholder="Enter your password"/><button type="button" aria-label={show?"Hide password":"Show password"} onClick={()=>setShow(v=>!v)}>{show?<EyeOff size={15}/>:<Eye size={15}/>}</button></div></label>
-  <div className="auth-row"><label className="check"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Remember Me</label><Link href="/auth/forgot-password">Forgot Password?</Link></div>
-  <div className="captcha" role="status" aria-label="Security verification"><span>□</span><div><b>I'm not a robot</b><small>Security verification is applied when required</small></div><span className="captcha-mark">↻</span></div>
-  {error&&<div className="auth-error" role="alert">{error}</div>}
-  <button className="auth-primary" disabled={signingIn}>{signingIn?<><span className="button-spinner"/>Signing in…</>:<>Sign In<ArrowRight size={17}/></>}</button>
-  <div className="or">or continue with</div>
-  <button type="button" className="sso" disabled><span>G</span><span>Sign in with Google</span><small>Coming soon</small></button>
-  <button type="button" className="sso" disabled><span className="ms-square">▦</span><span>Sign in with Microsoft</span><small>Coming soon</small></button>
- </form></AuthLayout>
+
+import "../app/auth/auth.css";
+
+function Logo() {
+  return (
+    <div className="ph-logo">
+      <div className="ph-logo-mark" aria-hidden="true">
+        <span className="dot dot-1" />
+        <span className="dot dot-2" />
+        <span className="dot dot-3" />
+        <span className="dot dot-4" />
+        <span className="dot dot-5" />
+        <span className="dot dot-6" />
+      </div>
+
+      <div className="ph-logo-text">
+        <strong>Pehal</strong>
+        <strong>Healthcare</strong>
+        <strong>Technologies</strong>
+      </div>
+    </div>
+  );
 }
-export function MfaScreen(){return <AuthLayout title="Verify Your Identity" sub="We sent a 6-digit verification code to mayank.swaroop@pehalhealthcare.com."><div className="method-tabs"><button className="selected">A. Email OTP</button><button>B. Authenticator</button><button>C. SMS OTP</button><button>D. Push</button></div><div className="otp-brand"><ShieldCheck size={24}/><b>Secure Authentication</b></div><h3 className="center">Enter verification code</h3><p className="center muted">Code expires in <b>02:45</b></p><div className="otp-inputs">{[1,2,4,6,7,9].map((x,i)=><input key={i} defaultValue={x}/>)}</div><label className="check center-check"><input type="checkbox"/> Remember this device for 30 days</label><button className="auth-primary">Verify & Continue <ArrowRight size={16}/></button><button className="text-btn">Resend Code (00:25)</button><button className="text-btn">Use another method</button></AuthLayout>}
-export function ForgotScreen(){return <AuthLayout title="Forgot Password?" sub="No worries! Enter your registered email address and we'll send you a link to reset your password."><form className="auth-form"><label>Work Email <b>*</b><div className="input-wrap"><Mail size={15}/><input placeholder="Enter your work email"/></div></label><button className="auth-primary">Send Reset Link <ArrowRight size={16}/></button><div className="or">or</div><Link className="back-btn" href="/login">← Back to Login</Link><div className="helper">Remember your password? <Link href="/login">Sign in</Link> &nbsp; Need help? <b>Contact Support</b></div></form></AuthLayout>}
-export function ResetScreen({expired=false}:{expired?:boolean}){return <AuthLayout title={expired?"Password Expired":"Create New Password"} sub={expired?"Your password has expired. Please set a new one to continue.":"Enter your new password below."}><form className="auth-form">{expired&&<div className="expired-icon"><Timer size={32}/></div>}{expired&&<label>Current Password <b>*</b><div className="input-wrap"><LockKeyhole size={15}/><input type="password" placeholder="Enter current password"/></div></label>}<label>New Password <b>*</b><div className="input-wrap"><LockKeyhole size={15}/><input type="password" placeholder="Enter new password"/></div></label><label>Confirm New Password <b>*</b><div className="input-wrap"><LockKeyhole size={15}/><input type="password" placeholder="Confirm new password"/></div></label><div className="strength"><span>Password Strength</span><i/><i/><i/><i/><b>Medium</b></div><ul className="rules"><li><Check size={12}/>At least 8 characters</li><li><Check size={12}/>At least 1 uppercase letter</li><li><Check size={12}/>At least 1 lowercase letter</li><li><Check size={12}/>At least 1 number</li><li><Check size={12}/>At least 1 special character</li></ul><button className="auth-primary">{expired?"Update Password":"Reset Password"}<ArrowRight size={16}/></button><Link className="back-btn" href="/login">← Back to Login</Link></form></AuthLayout>}
-export function SessionsScreen(){return <div className="security-page"><div className="security-top"><Logo/><Link href="/dashboard">← Back to Dashboard</Link></div><div className="security-shell"><div className="security-title"><div><div className="eyebrow">AUTHENTICATION & SECURITY</div><h1>Session / Device Management</h1><p>Manage your active sessions and trusted devices</p></div><ShieldCheck size={30}/></div><div className="security-cards"><div className="card current"><span>✓</span><b>This Device (Current Session)</b><p>Windows 11 · Chrome 124.0.6367.91</p><small>New Delhi, India · Last active: Just now</small><StatusMini text="Trusted Device"/></div><div className="card account"><b>Account Summary</b><div><strong>3</strong><span>Active Sessions</span></div><div><strong>2</strong><span>Trusted Devices</span></div><div><strong>12</strong><span>Login History</span></div></div></div><div className="card security-table"><div className="section-head"><b>Active Sessions</b><button className="btn outline">↻ Refresh</button></div><table><thead><tr><th>Device / Browser</th><th>Location</th><th>IP Address</th><th>Last Active</th><th>Status</th><th>Actions</th></tr></thead><tbody>{[["MacOS 14.4 · Safari 17.4","Bengaluru, Karnataka, India","203.0.113.25","10 mins ago","Active"],["Android 14 · Chrome Mobile 124.0","Mumbai, Maharashtra, India","103.21.44.55","2 hours ago","Active"],["Windows 10 · Edge 124.0","Kolkata, West Bengal, India","115.187.90.12","1 day ago","Idle"]].map(x=><tr key={x[0]}>{x.map((c,i)=><td key={i}>{i===4?<StatusMini text={c}/>:c}</td>)}<td><button className="btn outline">Logout</button></td></tr>)}</tbody></table><div className="trusted-devices"><h3>Trusted Devices</h3><div className="device-row"><span>◉</span><b>iPhone 15 · iOS 17.4</b><small>First used 01 May 2025 · Last used 3 days ago</small><button className="toggle on"/></div><div className="device-row"><span>▣</span><b>Dell XPS 13 · Windows 11</b><small>First used 20 Apr 2025 · Last used 6 days ago</small><button className="toggle"/></div></div><button className="danger-btn">Logout from all other sessions</button></div></div></div>}
-function StatusMini({text}:{text:string}){return <span className={`status ${text==="Idle"?"amber":"green"}`}>{text}</span>}
-export function AccessDenied(){return <AuthLayout title="Access Denied" sub="You don't have permission to access this resource."><div className="access-icon"><ShieldCheck size={52}/></div><div className="access-box"><b>What can you do?</b><p>• Contact your administrator.<br/>• Check if you have the right role.<br/>• Go back and try again.</p></div><Link className="auth-primary centered" href="/dashboard">⌂ Go to Dashboard</Link><Link className="back-btn" href="/dashboard">← Go Back</Link></AuthLayout>}
+
+function AuthLayout({
+  children,
+  title = "Welcome Back!",
+  sub = "Please sign in to continue to your account.",
+}: {
+  children: ReactNode;
+  title?: string;
+  sub?: string;
+}) {
+  return (
+    <main className="auth-page">
+      {/* LEFT BRANDING PANEL */}
+      <section className="auth-showcase">
+        <div className="showcase-inner">
+          <Logo />
+
+          <div className="showcase-copy">
+            <h1>
+              One Platform.
+              <br />
+              Complete Project
+              <br />
+              Excellence.
+            </h1>
+
+            <p>Plan. Track. Collaborate. Deliver.</p>
+          </div>
+
+          {/* CSS illustration - no external asset required */}
+          <div className="showcase-illustration" aria-hidden="true">
+            <div className="illustration-glow" />
+
+            <div className="dashboard-window">
+              <div className="window-top">
+                <span />
+                <span />
+                <span />
+              </div>
+
+              <div className="window-body">
+                <div className="window-sidebar">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </div>
+
+                <div className="window-content">
+                  <div className="chart-title" />
+
+                  <div className="chart-bars">
+                    <span style={{ height: "35%" }} />
+                    <span style={{ height: "55%" }} />
+                    <span style={{ height: "45%" }} />
+                    <span style={{ height: "75%" }} />
+                    <span style={{ height: "60%" }} />
+                    <span style={{ height: "90%" }} />
+                  </div>
+
+                  <div className="mini-cards">
+                    <div />
+                    <div />
+                    <div />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="floating-card floating-card-one">
+              <span className="floating-icon blue">✓</span>
+              <div>
+                <b>Projects</b>
+                <small>24 Active</small>
+              </div>
+            </div>
+
+            <div className="floating-card floating-card-two">
+              <span className="floating-icon purple">↗</span>
+              <div>
+                <b>Analytics</b>
+                <small>+24.8%</small>
+              </div>
+            </div>
+
+            <div className="floating-card floating-card-three">
+              <span className="floating-icon green">✓</span>
+              <div>
+                <b>Delivery</b>
+                <small>On Track</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="trusted-copy">
+            Trusted by teams to deliver successful
+            <br />
+            projects, every time.
+          </div>
+        </div>
+      </section>
+
+      {/* RIGHT LOGIN PANEL */}
+      <section className="auth-panel">
+        <div className="auth-card">
+          <div className="language-selector" aria-label="Language">
+            <span>EN</span>
+            <ChevronDown size={13} />
+          </div>
+
+          <div className="mobile-logo">
+            <Logo />
+          </div>
+
+          <div className="auth-heading">
+            <h2>{title}</h2>
+            <p>{sub}</p>
+          </div>
+
+          {children}
+
+          <footer className="auth-footer">
+            <div>
+              <a href="#" onClick={(e) => e.preventDefault()}>
+                Privacy Policy
+              </a>
+              <span>•</span>
+              <a href="#" onClick={(e) => e.preventDefault()}>
+                Terms of Use
+              </a>
+              <span>•</span>
+              <a href="#" onClick={(e) => e.preventDefault()}>
+                Support
+              </a>
+            </div>
+
+            <p>
+              © 2025 Pehal Healthcare Technologies. All rights reserved.
+            </p>
+          </footer>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+export function LoginScreen() {
+  const { signIn, signingIn, user } = useAuth();
+
+  const emailId = useId();
+  const passwordId = useId();
+
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [error, setError] = useState("");
+  const [fieldError, setFieldError] = useState("");
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (signingIn) return;
+
+    setError("");
+    setFieldError("");
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setFieldError("Please enter your work email.");
+      return;
+    }
+
+    if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    ) {
+      setFieldError("Please enter a valid work email address.");
+      return;
+    }
+
+    if (!pass) {
+      setError("Please enter your password.");
+      return;
+    }
+
+    try {
+      const authenticatedUser = await signIn(
+        normalizedEmail,
+        pass,
+        remember
+      );
+
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+
+      if (authenticatedUser.organizationId) {
+        window.location.replace(next || "/dashboard");
+      } else {
+        window.location.replace("/organization/setup");
+      }
+    } catch (err: unknown) {
+      const status = err instanceof ApiError ? err.status : 0;
+
+      if (status === 401) {
+        setError("Invalid email or password. Please try again.");
+      } else if (status === 423) {
+        setError(
+          "Your account is temporarily locked. Please try again later or contact your administrator."
+        );
+      } else if (status === 403) {
+        setError(
+          err instanceof ApiError
+            ? err.message || "Your account does not have access to PH-PMS."
+            : "Your account does not have access to PH-PMS."
+        );
+      } else {
+        setError(
+          err instanceof Error
+            ? err.message || "Unable to sign in. Please try again."
+            : "Unable to sign in. Please try again."
+        );
+      }
+    }
+  };
+
+  if (user) return null;
+
+  return (
+    <AuthLayout>
+      <form
+        className="auth-form"
+        onSubmit={submit}
+        noValidate
+        aria-label="Login form"
+      >
+        {/* EMAIL */}
+        <div className="form-field">
+          <label htmlFor={emailId} className="field-label">
+            <span>
+              Work Email <em>*</em>
+            </span>
+
+            <span className="step-number">1</span>
+          </label>
+
+          <div
+            className={`input-wrap ${
+              fieldError ? "has-error" : ""
+            }`}
+          >
+            <Mail size={17} aria-hidden="true" />
+
+            <input
+              id={emailId}
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setFieldError("");
+                setError("");
+              }}
+              placeholder="Enter your work email"
+              aria-invalid={Boolean(fieldError)}
+              aria-describedby={
+                fieldError ? `${emailId}-error` : undefined
+              }
+            />
+          </div>
+
+          {fieldError && (
+            <small
+              id={`${emailId}-error`}
+              className="field-error"
+              role="alert"
+            >
+              {fieldError}
+            </small>
+          )}
+        </div>
+
+        {/* PASSWORD */}
+        <div className="form-field">
+          <label htmlFor={passwordId} className="field-label">
+            <span>
+              Password <em>*</em>
+            </span>
+
+            <span className="step-number">2</span>
+          </label>
+
+          <div className="input-wrap">
+            <LockKeyhole size={17} aria-hidden="true" />
+
+            <input
+              id={passwordId}
+              name="password"
+              autoComplete="current-password"
+              type={showPassword ? "text" : "password"}
+              value={pass}
+              onChange={(e) => {
+                setPass(e.target.value);
+                setError("");
+              }}
+              placeholder="Enter your password"
+            />
+
+            <button
+              type="button"
+              className="password-toggle"
+              aria-label={
+                showPassword
+                  ? "Hide password"
+                  : "Show password"
+              }
+              onClick={() =>
+                setShowPassword((value) => !value)
+              }
+            >
+              {showPassword ? (
+                <EyeOff size={17} />
+              ) : (
+                <Eye size={17} />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* REMEMBER + FORGOT */}
+        <div className="auth-row">
+          <label className="remember-check">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+
+            <span className="custom-check" />
+
+            <span>Remember Me</span>
+          </label>
+
+          <Link href="/auth/forgot-password">
+            Forgot Password?
+          </Link>
+        </div>
+
+        {/* CAPTCHA / SECURITY */}
+        <div
+          className="captcha-box"
+          role="status"
+          aria-label="Security verification"
+        >
+          <span className="captcha-checkbox" />
+
+          <div className="captcha-content">
+            <strong>I'm not a robot</strong>
+            <small>Security verification</small>
+          </div>
+
+          <div className="captcha-brand">
+            <ShieldCheck size={22} />
+            <small>reCAPTCHA</small>
+          </div>
+        </div>
+
+        {/* ERROR */}
+        {error && (
+          <div
+            className="auth-error"
+            role="alert"
+            aria-live="polite"
+          >
+            <span className="error-icon">!</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* LOGIN */}
+        <button
+          type="submit"
+          className="auth-primary"
+          disabled={signingIn}
+        >
+          {signingIn ? (
+            <>
+              <span className="button-spinner" />
+              Signing in...
+            </>
+          ) : (
+            <>
+              <span>Sign In</span>
+              <ArrowRight size={18} />
+            </>
+          )}
+        </button>
+
+        {/* DIVIDER */}
+        <div className="or-divider">
+          <span>or continue with</span>
+        </div>
+
+        {/* GOOGLE */}
+        <button
+          type="button"
+          className="sso-button"
+          disabled
+        >
+          <span className="google-icon">G</span>
+
+          <span>Sign in with Google</span>
+
+          <small>Coming soon</small>
+        </button>
+
+        {/* MICROSOFT */}
+        <button
+          type="button"
+          className="sso-button"
+          disabled
+        >
+          <span className="microsoft-icon">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+
+          <span>Sign in with Microsoft</span>
+
+          <small>Coming soon</small>
+        </button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+export function MfaScreen() {
+  const [otp, setOtp] = useState("");
+  const [rememberDevice, setRememberDevice] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setTimeout(() => {
+      window.location.href = "/dashboard";
+    }, 600);
+  };
+
+  return (
+    <AuthLayout title="Two-Factor Authentication" sub="Enter the 6-digit verification code sent to your registered device.">
+      <form className="auth-form" onSubmit={handleSubmit}>
+        <div className="field-group">
+          <label htmlFor="otp">Security Code (TOTP / SMS)</label>
+          <div className="input-wrap">
+            <ShieldCheck size={18} className="field-icon" />
+            <input
+              id="otp"
+              type="text"
+              maxLength={6}
+              placeholder="000000"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              required
+              autoFocus
+              style={{ letterSpacing: "4px", fontSize: "1.2rem", fontWeight: "bold" }}
+            />
+          </div>
+        </div>
+
+        <div className="auth-row">
+          <label className="checkbox-wrap">
+            <input
+              type="checkbox"
+              checked={rememberDevice}
+              onChange={(e) => setRememberDevice(e.target.checked)}
+            />
+            <span>Remember this device for 30 days</span>
+          </label>
+        </div>
+
+        <button type="submit" className="submit-button" disabled={loading || otp.length < 6}>
+          {loading ? "Verifying..." : "Verify & Continue"}
+        </button>
+
+        <div style={{ textAlign: "center", marginTop: "1rem" }}>
+          <button type="button" className="text-link" onClick={() => alert("Verification code resent.")}>
+            Resend verification code
+          </button>
+        </div>
+      </form>
+    </AuthLayout>
+  );
+}
+
+export function ForgotScreen() {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSent(true);
+  };
+
+  return (
+    <AuthLayout title="Reset Password" sub="Enter your work email address to receive password reset instructions.">
+      {sent ? (
+        <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
+          <ShieldCheck size={48} color="#059669" style={{ margin: "0 auto 1rem" }} />
+          <h3>Check your inbox</h3>
+          <p style={{ color: "#64748b", margin: "0.5rem 0 1.5rem" }}>
+            We have sent a secure password reset link to <b>{email}</b>. Link expires in 30 minutes.
+          </p>
+          <Link href="/login" className="submit-button" style={{ display: "inline-block", textAlign: "center" }}>
+            Return to Sign In
+          </Link>
+        </div>
+      ) : (
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <div className="field-group">
+            <label htmlFor="email">Work Email</label>
+            <div className="input-wrap">
+              <Mail size={18} className="field-icon" />
+              <input
+                id="email"
+                type="email"
+                placeholder="name@pehalhealthcare.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button type="submit" className="submit-button">
+            Send Reset Instructions
+          </button>
+
+          <div style={{ textAlign: "center", marginTop: "1rem" }}>
+            <Link href="/login" className="text-link">
+              Remember your password? Sign In
+            </Link>
+          </div>
+        </form>
+      )}
+    </AuthLayout>
+  );
+}
+
+export function ResetScreen({ expired = false }: { expired?: boolean } = {}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [done, setDone] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
+    setDone(true);
+  };
+
+  return (
+    <AuthLayout
+      title={expired ? "Password Expired" : "Create New Password"}
+      sub={expired ? "Your password has expired per the 90-day security policy. Please set a new password." : "Your new password must be at least 8 characters with numbers and symbols."}
+    >
+      {done ? (
+        <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
+          <ShieldCheck size={48} color="#059669" style={{ margin: "0 auto 1rem" }} />
+          <h3>Password Updated</h3>
+          <p style={{ color: "#64748b", margin: "0.5rem 0 1.5rem" }}>
+            Your credentials have been securely updated. Please sign in with your new password.
+          </p>
+          <Link href="/login" className="submit-button" style={{ display: "inline-block", textAlign: "center" }}>
+            Sign In Now
+          </Link>
+        </div>
+      ) : (
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <div className="field-group">
+            <label htmlFor="np">New Password</label>
+            <div className="input-wrap">
+              <LockKeyhole size={18} className="field-icon" />
+              <input
+                id="np"
+                type="password"
+                placeholder="••••••••••••"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={8}
+              />
+            </div>
+          </div>
+
+          <div className="field-group">
+            <label htmlFor="cp">Confirm New Password</label>
+            <div className="input-wrap">
+              <LockKeyhole size={18} className="field-icon" />
+              <input
+                id="cp"
+                type="password"
+                placeholder="••••••••••••"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                minLength={8}
+              />
+            </div>
+          </div>
+
+          <button type="submit" className="submit-button">
+            Save New Password
+          </button>
+        </form>
+      )}
+    </AuthLayout>
+  );
+}
+
+export function SessionsScreen() {
+  return (
+    <AuthLayout title="Active Sessions" sub="Manage and terminate active login sessions across your devices.">
+      <div style={{ padding: "1rem 0" }}>
+        <div className="card" style={{ padding: "1rem", marginBottom: "1rem", border: "1px solid #e2e8f0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <b>Windows PC · Chrome Browser</b>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "#64748b" }}>Hyderabad, India · Active Now</p>
+            </div>
+            <span style={{ fontSize: "0.8rem", color: "#059669", fontWeight: "bold" }}>CURRENT DEVICE</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="submit-button"
+          style={{ background: "#dc2626", borderColor: "#dc2626" }}
+          onClick={() => alert("All other sessions revoked.")}
+        >
+          Revoke All Other Sessions
+        </button>
+
+        <div style={{ textAlign: "center", marginTop: "1rem" }}>
+          <Link href="/dashboard" className="text-link">
+            Return to Dashboard
+          </Link>
+        </div>
+      </div>
+    </AuthLayout>
+  );
+}
+
+export function AccessDenied() {
+  return (
+    <AuthLayout title="Access Denied" sub="You do not have the required permissions to access this screen.">
+      <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
+        <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🔒</div>
+        <h3>403 — Restricted Area</h3>
+        <p style={{ color: "#64748b", margin: "0.5rem 0 1.5rem" }}>
+          This resource is protected by PH-PMS Role-Based Access Control (RBAC). Please contact your Department Head or System Administrator to request elevated access.
+        </p>
+        <Link href="/dashboard" className="submit-button" style={{ display: "inline-block", textAlign: "center" }}>
+          Back to Dashboard
+        </Link>
+      </div>
+    </AuthLayout>
+  );
+}

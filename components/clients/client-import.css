@@ -1,0 +1,45 @@
+
+.ci-page { padding:14px; color:#14264c; font-size:12px; }
+.ci-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.ci-heading h1 { margin:0; font-size:23px; font-weight:750; }
+.ci-heading p { margin:4px 0 0; color:#7182a0; font-size:11px; }
+.ci-grid { display:grid; grid-template-columns: minmax(220px,.8fr) minmax(250px,.8fr) minmax(380px,1.5fr); gap:12px; }
+.ci-card { min-width:0; padding:15px; background:#fff; border:1px solid #dce5f3; border-radius:9px; }
+.ci-card-title { display:flex; align-items:flex-start; gap:9px; margin-bottom:16px; }
+.ci-step { width:23px; height:23px; display:grid; place-items:center; flex:0 0 23px; color:#fff; background:#0757f9; border-radius:6px; font-weight:700; }
+.ci-card-title h3 { margin:0; font-size:12px; }
+.ci-card-title p { margin:4px 0 0; color:#7485a2; font-size:10px; }
+.ci-template { min-height:220px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:15px; border:1px dashed #cbd9eb; border-radius:8px; background:#f9fbff; color:#168451; text-align:center; }
+.ci-template b { color:#1c3158; font-size:11px; }
+.ci-template small { color:#7182a0; font-size:9px; }
+.ci-download { display:flex; align-items:center; gap:7px; margin-top:6px; padding:8px 12px; color:#07834e; background:#e7f8ef; border:1px solid #c9edda; border-radius:5px; font-size:10px; font-weight:650; }
+.ci-drop { width:100%; min-height:220px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; border:1px dashed #c1d1e8; border-radius:8px; background:#fafcff; color:#0757f9; }
+.ci-drop b { color:#263e67; font-size:11px; }
+.ci-drop span,.ci-drop small { color:#7283a0; font-size:10px; }
+.ci-drop strong { margin-top:5px; padding:7px 14px; border:1px solid #0757f9; border-radius:5px; color:#0757f9; font-size:10px; }
+.ci-file { display:flex; align-items:center; gap:8px; margin-top:10px; padding:8px; border:1px solid #dce5f3; border-radius:6px; color:#0757f9; }
+.ci-file span { flex:1; overflow-wrap:anywhere; color:#243a61; font-size:10px; }
+.ci-file button { display:grid; place-items:center; width:25px; height:25px; border:0; background:#fff0f0; color:#dc2626; border-radius:4px; }
+.ci-preview-card { grid-column:1 / -1; }
+.ci-counts { display:flex; gap:10px; margin-bottom:12px; }
+.ci-counts span { display:grid; gap:4px; min-width:100px; padding:9px 12px; border:1px solid #e0e8f3; border-radius:6px; color:#657897; font-size:9px; }
+.ci-counts b { color:#172b54; font-size:17px; }
+.ci-counts .good b { color:#07844e; }
+.ci-counts .bad b { color:#dc2626; }
+.ci-table-wrap { width:100%; overflow:auto; border:1px solid #e0e8f3; border-radius:6px; }
+.ci-table { width:100%; border-collapse:collapse; min-width:600px; }
+.ci-table th { padding:10px; text-align:left; color:#263d66; background:#f6f9ff; font-size:10px; }
+.ci-table td { padding:10px; border-top:1px solid #edf1f7; color:#30466d; font-size:10px; }
+.ci-table .valid { color:#07844e; background:#e5f8ed; padding:4px 7px; border-radius:4px; }
+.ci-table .invalid { color:#c62828; background:#fff0f0; padding:4px 7px; border-radius:4px; }
+.ci-note { display:block; margin-top:8px; color:#7182a0; }
+.ci-empty { display:grid; min-height:120px; place-items:center; color:#7182a0; border:1px dashed #d5dfed; border-radius:7px; font-size:10px; }
+.ci-footer { grid-column:1 / -1; display:flex; justify-content:flex-end; gap:8px; }
+.ci-footer button:disabled { opacity:.45; cursor:not-allowed; }
+.ci-message { display:flex; align-items:center; gap:8px; margin-bottom:12px; padding:10px; color:#9a5a00; background:#fff7e7; border:1px solid #f4dfb4; border-radius:6px; font-size:10px; }
+.ci-success { max-width:500px; margin:70px auto; padding:35px; display:flex; flex-direction:column; align-items:center; gap:12px; text-align:center; background:#fff; border:1px solid #dce5f3; border-radius:10px; }
+.ci-success > svg { color:#07965b; }
+.ci-success h2 { margin:0; color:#07844e; font-size:18px; }
+.ci-success p { color:#64748b; font-size:11px; }
+@media(max-width:950px) { .ci-grid { grid-template-columns:1fr 1fr; } .ci-preview-card,.ci-footer { grid-column:1 / -1; } }
+@media(max-width:600px) { .ci-page { padding:10px 7px; } .ci-heading { align-items:flex-start; flex-direction:column; } .ci-grid { grid-template-columns:1fr; } .ci-preview-card,.ci-footer { grid-column:auto; } }
