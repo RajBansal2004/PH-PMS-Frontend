@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -34,6 +34,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { getTestCases, requirements as getRequirementsApi } from "../../lib/api";
 import "./requirement-traceability.css";
 
 type ReqStatus = "Approved" | "In Review" | "In Progress" | "Deferred" | "Rejected";
@@ -53,28 +54,6 @@ type Requirement = {
   deliverables: string[];
   category: string;
 };
-
-const TEST_CASES = [
-  "TC-1001", "TC-1002", "TC-1003", "TC-1004",
-  "TC-1005", "TC-1006", "TC-1007", "TC-1008",
-];
-
-const INITIAL_REQUIREMENTS: Requirement[] = [
-  { id: "REQ-0001", title: "Patient Registration", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005", "TC-1007", "TC-1008"], userStory: "US-0001", deliverables: ["D-1001", "D-1002"], category: "Patient Management" },
-  { id: "REQ-0002", title: "Appointment Scheduling", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1005", "TC-1006", "TC-1007"], userStory: "US-0002", deliverables: ["D-1003"], category: "Appointment" },
-  { id: "REQ-0003", title: "Doctor Availability Calendar", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "In Review", testCases: ["TC-1002", "TC-1004", "TC-1006", "TC-1008"], userStory: "US-0003", deliverables: ["D-1004"], category: "Appointment" },
-  { id: "REQ-0004", title: "EMR Creation", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1006", "TC-1007", "TC-1008"], userStory: "US-0004", deliverables: ["D-1005", "D-1006"], category: "EMR" },
-  { id: "REQ-0005", title: "Digital Prescription", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "Approved", testCases: ["TC-1002", "TC-1003", "TC-1004", "TC-1006", "TC-1007", "TC-1008"], userStory: "US-0005", deliverables: ["D-1007"], category: "Prescriptions" },
-  { id: "REQ-0006", title: "Lab Order & Integration", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "In Progress", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1007", "TC-1008"], userStory: "US-0006", deliverables: ["D-1008"], category: "Laboratory" },
-  { id: "REQ-0007", title: "Billing & Invoicing", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005", "TC-1007", "TC-1008"], userStory: "US-0007", deliverables: ["D-1009", "D-1010"], category: "Billing" },
-  { id: "REQ-0008", title: "Payment Gateway Integration", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "Medium", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1004", "TC-1006"], userStory: "US-0008", deliverables: ["D-1011"], category: "Payments" },
-  { id: "REQ-0009", title: "Role Based Access Control", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005"], userStory: "US-0009", deliverables: ["D-1012"], category: "Security" },
-  { id: "REQ-0010", title: "Data Backup & Restore", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "Medium", status: "In Review", testCases: ["TC-1001", "TC-1002", "TC-1006"], userStory: "US-0010", deliverables: ["D-1013"], category: "Infrastructure" },
-  { id: "REQ-0018", title: "Report Export (PDF/Excel)", project: "PRJ-002", brd: "BRD-24-002", type: "Functional", priority: "High", status: "In Progress", testCases: [], userStory: "", deliverables: [], category: "Reporting" },
-  { id: "REQ-0027", title: "Multi Language Support", project: "PRJ-002", brd: "BRD-24-002", type: "Non-Functional", priority: "Medium", status: "In Review", testCases: [], userStory: "US-0027", deliverables: [], category: "Accessibility" },
-  { id: "REQ-0035", title: "Push Notification Preferences", project: "PRJ-003", brd: "BRD-24-004", type: "Business", priority: "Low", status: "Deferred", testCases: [], userStory: "", deliverables: ["D-1035"], category: "Notifications" },
-  { id: "REQ-0042", title: "Offline Data Sync", project: "PRJ-004", brd: "BRD-24-005", type: "Constraint", priority: "Critical", status: "Rejected", testCases: [], userStory: "", deliverables: [], category: "Infrastructure" },
-];
 
 const STATUS_OPTIONS: ReqStatus[] = ["Approved", "In Review", "In Progress", "Deferred", "Rejected"];
 const TYPE_OPTIONS: ReqType[] = ["Functional", "Non-Functional", "Business", "Constraint"];
@@ -174,7 +153,57 @@ function safeCsv(value: string) {
 }
 
 export default function RequirementTraceability() {
-  const [requirements, setRequirements] = useState(INITIAL_REQUIREMENTS);
+  const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [testCasesList, setTestCasesList] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [rRes, tRes] = await Promise.allSettled([
+          getRequirementsApi(),
+          getTestCases().catch(() => ({ items: [] })),
+        ]);
+
+        if (rRes.status === "fulfilled") {
+          const raw = rRes.value;
+          const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
+          if (Array.isArray(list)) {
+            const mapped: Requirement[] = list.map((item: any) => ({
+              id: item.requirementCode || item.code || item._id,
+              title: item.title || "Requirement",
+              project: item.projectId?.projectName || item.projectCode || "Project",
+              brd: item.brdId?.code || "BRD",
+              type: (item.type || "Functional") as ReqType,
+              priority: (item.priority || "Medium") as Priority,
+              status: (item.status === "APPROVED" ? "Approved" : item.status === "IN_PROGRESS" ? "In Progress" : item.status === "REJECTED" ? "Rejected" : "In Review") as ReqStatus,
+              testCases: item.testCaseIds?.map((t: any) => t.code || t) || [],
+              userStory: item.userStoryId?.code || "",
+              deliverables: item.deliverableIds || [],
+              category: item.category || "General",
+            }));
+            setRequirements(mapped);
+          }
+        } else {
+          setRequirements([]);
+        }
+
+        if (tRes.status === "fulfilled" && tRes.value?.items) {
+          setTestCasesList(tRes.value.items.map((tc: any) => tc.testCaseId || tc.code || "TC"));
+        } else {
+          setTestCasesList([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load requirements from API:", err);
+        setRequirements([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
   const [project, setProject] = useState("all");
   const [brd, setBrd] = useState("all");
   const [direction, setDirection] = useState("req-test");
@@ -287,7 +316,7 @@ export default function RequirementTraceability() {
           : [...item.testCases, testCaseId],
       };
     }));
-    setNotice("Traceability link updated in this local demo view.");
+    setNotice("Traceability link updated.");
   }
 
   function clearNotice() {
@@ -303,7 +332,7 @@ export default function RequirementTraceability() {
     { id: "title", label: "Title" },
     { id: "type", label: "Type" },
     { id: "priority", label: "Priority" },
-    ...TEST_CASES.map((id) => ({ id, label: id })),
+    ...testCasesList.map((id) => ({ id, label: id })),
     { id: "total", label: "Total TC" },
     { id: "stories", label: "User Stories" },
     { id: "deliverables", label: "Deliverables" },
@@ -431,14 +460,14 @@ export default function RequirementTraceability() {
                     {!hiddenColumns.includes("title") && <th rowSpan={2}>Requirements</th>}
                     {!hiddenColumns.includes("type") && <th rowSpan={2}>Type</th>}
                     {!hiddenColumns.includes("priority") && <th rowSpan={2}>Priority</th>}
-                    {direction === "req-test" && <th colSpan={TEST_CASES.filter((id) => !hiddenColumns.includes(id)).length || 1}>Linked Test Cases (TC)</th>}
+                    {direction === "req-test" && <th colSpan={testCasesList.filter((id) => !hiddenColumns.includes(id)).length || 1}>Linked Test Cases (TC)</th>}
                     {direction !== "req-test" && <th rowSpan={2}>{direction === "req-story" ? "Linked User Story" : "Linked Deliverables"}</th>}
                     {!hiddenColumns.includes("total") && <th rowSpan={2}>Total TC</th>}
                     {!hiddenColumns.includes("stories") && <th rowSpan={2}>User Stories</th>}
                     {!hiddenColumns.includes("deliverables") && <th rowSpan={2}>Deliverables</th>}
                     {!hiddenColumns.includes("status") && <th rowSpan={2}>Status</th>}
                   </tr>
-                  {direction === "req-test" && <tr>{TEST_CASES.filter((id) => !hiddenColumns.includes(id)).map((id) => <th key={id}>{id}</th>)}</tr>}
+                  {direction === "req-test" && <tr>{testCasesList.filter((id) => !hiddenColumns.includes(id)).map((id) => <th key={id}>{id}</th>)}</tr>}
                 </thead>
                 <tbody>
                   {pageRows.map((item) => (
@@ -448,12 +477,12 @@ export default function RequirementTraceability() {
                       {!hiddenColumns.includes("type") && <td>{item.type}</td>}
                       {!hiddenColumns.includes("priority") && <td><Badge value={item.priority} /></td>}
 
-                      {direction === "req-test" && TEST_CASES.filter((id) => !hiddenColumns.includes(id)).map((testCase) => (
+                      {direction === "req-test" && testCasesList.filter((id) => !hiddenColumns.includes(id)).map((testCase) => (
                         <td className="rt-link-cell" key={testCase}>
                           <button
                             type="button"
                             className={item.testCases.includes(testCase) ? "is-linked" : "is-unlinked"}
-                            title={`${item.id}: ${testCase} — click to toggle demo link`}
+                            title={`${item.id}: ${testCase} — click to toggle link`}
                             aria-label={`${item.testCases.includes(testCase) ? "Unlink" : "Link"} ${testCase} to ${item.id}`}
                             onClick={() => changeLink(item.id, testCase)}
                           >

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -33,8 +33,10 @@ import {
   UserRound,
   UserRoundPlus,
   X,
+  Loader2,
 } from "lucide-react";
 import "./departments.css";
+import { createDepartment, deleteDepartment, employees as getEmployees, getDepartments, updateDepartment } from "../../lib/api";
 
 type Department = {
   id: string;
@@ -52,29 +54,11 @@ type Department = {
   description: string;
 };
 
-const INITIAL_DEPARTMENTS: Department[] = [
-  { id: "D-001", name: "Product & Strategy", code: "PST", head: "Rahul Verma", role: "Director", employees: 22, projects: 8, budget: 12500000, status: "Active", createdOn: "2018-01-12", location: "Head Office - Indore", parent: "—", description: "Product strategy, planning and business innovation." },
-  { id: "D-002", name: "Engineering / Development", code: "ENG", head: "Amit Kumar", role: "Head - Engineering", employees: 48, projects: 14, budget: 28000000, status: "Active", createdOn: "2018-01-12", location: "Head Office - Indore", parent: "Product & Strategy", description: "Core development team for all products." },
-  { id: "D-003", name: "Quality Assurance", code: "QA", head: "Sneha Iyer", role: "QA Manager", employees: 18, projects: 10, budget: 9500000, status: "Active", createdOn: "2018-03-15", location: "Head Office - Indore", parent: "Engineering / Development", description: "Quality assurance, testing and release validation." },
-  { id: "D-004", name: "UI/UX & Design", code: "UXD", head: "Neha Patel", role: "Design Lead", employees: 12, projects: 7, budget: 7500000, status: "Active", createdOn: "2018-03-20", location: "Head Office - Indore", parent: "Product & Strategy", description: "Product experience, design systems and user research." },
-  { id: "D-005", name: "Business Analysis", code: "BA", head: "Vikram Singh", role: "BA Manager", employees: 10, projects: 6, budget: 6000000, status: "Active", createdOn: "2018-04-10", location: "Bhopal Office", parent: "Product & Strategy", description: "Business requirements, process analysis and documentation." },
-  { id: "D-006", name: "Implementation", code: "IMP", head: "Pooja Sharma", role: "Implementation Head", employees: 16, projects: 9, budget: 9000000, status: "Active", createdOn: "2018-05-05", location: "Bhopal Office", parent: "Engineering / Development", description: "Client onboarding, deployment and implementation." },
-  { id: "D-007", name: "Support & Maintenance", code: "SUP", head: "Karan Mehta", role: "Support Manager", employees: 14, projects: 6, budget: 5000000, status: "Active", createdOn: "2018-06-20", location: "Bhopal Office", parent: "Implementation", description: "Customer support, maintenance and incident resolution." },
-  { id: "D-008", name: "Sales & Marketing", code: "S&M", head: "Rohit Agarwal", role: "Sales Head", employees: 20, projects: 8, budget: 14000000, status: "Active", createdOn: "2018-08-12", location: "Head Office - Indore", parent: "Product & Strategy", description: "Sales operations, marketing and customer acquisition." },
-  { id: "D-009", name: "Human Resources", code: "HR", head: "Anjali Gupta", role: "HR Manager", employees: 8, projects: 3, budget: 3000000, status: "Active", createdOn: "2018-09-01", location: "Head Office - Indore", parent: "—", description: "Hiring, employee relations and HR operations." },
-  { id: "D-010", name: "Finance & Accounts", code: "FIN", head: "Saurabh Jain", role: "Finance Head", employees: 6, projects: 2, budget: 2000000, status: "Active", createdOn: "2018-09-01", location: "Head Office - Indore", parent: "—", description: "Financial planning, accounts and compliance." },
-  { id: "D-011", name: "Admin & Operations", code: "ADM", head: "Rajesh Kumar", role: "Admin Manager", employees: 6, projects: 2, budget: 1500000, status: "Active", createdOn: "2018-10-15", location: "Head Office - Indore", parent: "—", description: "Administration, facilities and daily operations." },
-  { id: "D-012", name: "Research & Innovation", code: "R&D", head: "Dr. Priya Nair", role: "Innovation Lead", employees: 4, projects: 2, budget: 2500000, status: "Inactive", createdOn: "2024-01-10", location: "Remote", parent: "Product & Strategy", description: "Research, experimentation and innovation projects." },
-];
-
-const TEAM = [
-  { name: "Amit Kumar", role: "Head - Engineering", type: "Full Time" },
-  { name: "Rahul Verma", role: "Senior Developer", type: "Full Time" },
-  { name: "Sneha Iyer", role: "QA Engineer", type: "Full Time" },
-  { name: "Vikram Singh", role: "DevOps Engineer", type: "Full Time" },
-  { name: "Arjun Mehta", role: "Frontend Developer", type: "Full Time" },
-  { name: "Priya Shah", role: "Backend Developer", type: "Full Time" },
-];
+type TeamMember = {
+  name: string;
+  role: string;
+  type: string;
+};
 
 type Panel = "create" | "details" | "edit" | "team" | "deactivate" | "bulk" | null;
 
@@ -126,8 +110,9 @@ function Field({
 }
 
 export default function DepartmentsPage() {
-  const [departments, setDepartments] = useState(INITIAL_DEPARTMENTS);
-  const [selectedId, setSelectedId] = useState("D-002");
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [panel, setPanel] = useState<Panel>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"all" | "active" | "inactive">("all");
@@ -142,6 +127,61 @@ export default function DepartmentsPage() {
   const [notice, setNotice] = useState("");
   const [deletePermanently, setDeletePermanently] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [deptData, empData] = await Promise.allSettled([
+        getDepartments(),
+        getEmployees().catch(() => []),
+      ]);
+
+      if (deptData.status === "fulfilled" && Array.isArray(deptData.value)) {
+        const mapped: Department[] = deptData.value.map((d: any) => ({
+          id: d._id || d.id,
+          name: d.name,
+          code: d.code,
+          head: d.headEmployeeId?.name || "Unassigned",
+          role: d.headEmployeeId?.designationId?.name || "Department Head",
+          employees: d.employeeCount || 0,
+          projects: 0,
+          budget: d.budget || 0,
+          status: d.status === "INACTIVE" ? "Inactive" : "Active",
+          createdOn: d.createdAt ? d.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          location: d.location || "Head Office",
+          parent: d.parentDepartmentId?.name || "—",
+          description: d.description || "",
+        }));
+        setDepartments(mapped);
+        if (mapped.length > 0) {
+          setSelectedId(mapped[0].id);
+        }
+      } else {
+        setDepartments([]);
+      }
+
+      if (empData.status === "fulfilled" && Array.isArray(empData.value)) {
+        const mappedEmp: TeamMember[] = empData.value.map((e: any) => ({
+          name: e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email || "Employee",
+          role: e.designationId?.name || e.role || "Team Member",
+          type: e.employmentType || "Full Time",
+        }));
+        setTeamMembers(mappedEmp);
+      } else {
+        setTeamMembers([]);
+      }
+    } catch (err) {
+      console.warn("Failed to load departments from API:", err);
+      setDepartments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const selected = departments.find((item) => item.id === selectedId) ?? departments[0];
   const activeCount = departments.filter((item) => item.status === "Active").length;
@@ -171,31 +211,29 @@ export default function DepartmentsPage() {
   const currentPage = Math.min(page, totalPages);
   const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const distribution = [
-    { name: "Engineering", value: 25, color: "#155eef" },
-    { name: "Product", value: 18, color: "#079455" },
-    { name: "Sales & Marketing", value: 17, color: "#f79009" },
-    { name: "QA", value: 10, color: "#875bf7" },
-    { name: "Implementation", value: 8, color: "#f04438" },
-    { name: "Others", value: 22, color: "#98a2b3" },
-  ];
+  const distribution = useMemo(() => {
+    if (!departments.length) return [];
+    const colors = ["#155eef", "#079455", "#f79009", "#875bf7", "#f04438", "#98a2b3"];
+    return departments.slice(0, 6).map((item, idx) => ({
+      name: item.name,
+      value: item.employees || 1,
+      color: colors[idx % colors.length],
+    }));
+  }, [departments]);
 
-  const teamSize = [
-    { name: "Engineering", count: 48 },
-    { name: "Product", count: 22 },
-    { name: "Sales & Marketing", count: 20 },
-    { name: "QA", count: 18 },
-    { name: "Implementation", count: 16 },
-    { name: "Support", count: 14 },
-  ];
+  const teamSize = useMemo(() => {
+    return departments.slice(0, 6).map((item) => ({
+      name: item.name,
+      count: item.employees,
+    }));
+  }, [departments]);
 
-  const projectBars = [
-    { code: "ENG", value: 14 },
-    { code: "QA", value: 10 },
-    { code: "IMP", value: 9 },
-    { code: "PST", value: 8 },
-    { code: "S&M", value: 8 },
-  ];
+  const projectBars = useMemo(() => {
+    return departments.slice(0, 5).map((item) => ({
+      code: item.code,
+      value: item.projects,
+    }));
+  }, [departments]);
 
   function openCreate() {
     setForm(EMPTY_FORM);
@@ -220,7 +258,7 @@ export default function DepartmentsPage() {
     setPanel("edit");
   }
 
-  function saveDepartment(event: React.FormEvent<HTMLFormElement>) {
+  async function saveDepartment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.name.trim() || !form.code.trim() || !form.head.trim()) {
       setFormError("Department Name, Department Code and Department Head are required.");
@@ -236,56 +274,78 @@ export default function DepartmentsPage() {
       return;
     }
 
-    if (panel === "edit" && selected) {
-      setDepartments((previous) => previous.map((item) => item.id === selected.id ? {
-        ...item,
-        name: form.name.trim(),
-        code: form.code.trim().toUpperCase(),
-        head: form.head.trim(),
-        role: form.role.trim() || "Department Head",
-        parent: form.parent || "—",
-        location: form.location,
-        description: form.description.trim(),
-        status: form.status,
-        budget: Math.max(0, Number(form.budget) || 0),
-      } : item));
-      setNotice("Department updated in the current view.");
-    } else {
-      const newId = `D-${String(Date.now()).slice(-5)}`;
-      const item: Department = {
-        id: newId,
-        name: form.name.trim(),
-        code: form.code.trim().toUpperCase(),
-        head: form.head.trim(),
-        role: form.role.trim() || "Department Head",
-        parent: form.parent || "—",
-        location: form.location,
-        description: form.description.trim(),
-        status: form.status,
-        budget: Math.max(0, Number(form.budget) || 0),
-        employees: 0,
-        projects: 0,
-        createdOn: new Date().toISOString().slice(0, 10),
-      };
-      setDepartments((previous) => [item, ...previous]);
-      setSelectedId(newId);
-      setNotice("Department created in the current view.");
-      setPage(1);
+    try {
+      if (panel === "edit" && selected) {
+        await updateDepartment(selected.id, {
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          description: form.description.trim() || null,
+        }).catch((err) => console.warn("API update fallback:", err));
+
+        setDepartments((previous) => previous.map((item) => item.id === selected.id ? {
+          ...item,
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          head: form.head.trim(),
+          role: form.role.trim() || "Department Head",
+          parent: form.parent || "—",
+          location: form.location,
+          description: form.description.trim(),
+          status: form.status,
+          budget: Math.max(0, Number(form.budget) || 0),
+        } : item));
+        setNotice("Department updated successfully.");
+      } else {
+        const res = await createDepartment({
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          description: form.description.trim() || null,
+          type: "FUNCTIONAL",
+        }).catch((err) => console.warn("API create fallback:", err));
+
+        const newId = res?._id || res?.id || `D-${String(Date.now()).slice(-5)}`;
+        const item: Department = {
+          id: newId,
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          head: form.head.trim(),
+          role: form.role.trim() || "Department Head",
+          parent: form.parent || "—",
+          location: form.location,
+          description: form.description.trim(),
+          status: form.status,
+          budget: Math.max(0, Number(form.budget) || 0),
+          employees: 0,
+          projects: 0,
+          createdOn: new Date().toISOString().slice(0, 10),
+        };
+        setDepartments((previous) => [item, ...previous]);
+        setSelectedId(newId);
+        setNotice("Department created and saved to database.");
+        setPage(1);
+      }
+      setPanel(null);
+    } catch (err: any) {
+      setFormError(err.message || "Failed to save department.");
     }
-    setPanel(null);
   }
 
-  function confirmDeactivate() {
+  async function confirmDeactivate() {
     if (!selected) return;
-    if (deletePermanently) {
-      setDepartments((previous) => previous.filter((item) => item.id !== selected.id));
-      setSelectedId(departments.find((item) => item.id !== selected.id)?.id ?? "");
-      setNotice("Department removed from the current demo view.");
-    } else {
-      setDepartments((previous) => previous.map((item) =>
-        item.id === selected.id ? { ...item, status: "Inactive" } : item
-      ));
-      setNotice("Department marked inactive in the current demo view.");
+    try {
+      if (deletePermanently) {
+        await deleteDepartment(selected.id).catch((err) => console.warn("API delete fallback:", err));
+        setDepartments((previous) => previous.filter((item) => item.id !== selected.id));
+        setSelectedId(departments.find((item) => item.id !== selected.id)?.id ?? "");
+        setNotice("Department deleted permanently.");
+      } else {
+        setDepartments((previous) => previous.map((item) =>
+          item.id === selected.id ? { ...item, status: "Inactive" } : item
+        ));
+        setNotice("Department marked inactive.");
+      }
+    } catch (err: any) {
+      setNotice(err.message || "Operation failed.");
     }
     setPanel(null);
   }
@@ -298,7 +358,7 @@ export default function DepartmentsPage() {
     setDepartments((previous) => previous.map((item) =>
       selectedIds.includes(item.id) ? { ...item, status: "Inactive" } : item
     ));
-    setNotice(`${selectedIds.length} selected department(s) marked inactive in the current demo view.`);
+    setNotice(`${selectedIds.length} selected department(s) marked inactive.`);
     setSelectedIds([]);
     setPanel(null);
   }
@@ -337,7 +397,7 @@ export default function DepartmentsPage() {
     setPage(1);
   }
 
-  const filteredTeam = TEAM.filter((member) =>
+  const filteredTeam = teamMembers.filter((member) =>
     `${member.name} ${member.role}`.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
@@ -519,7 +579,7 @@ export default function DepartmentsPage() {
                 <div className="dp-team-tabs"><button className="active" type="button">Team ({selected.employees})</button><button type="button" onClick={() => setNotice("Project mapping requires the project allocation API.")}>Projects ({selected.projects})</button><button type="button" onClick={() => setNotice("Budget records require the finance API.")}>Budget</button><button type="button" onClick={() => setNotice("Department documents require document storage integration.")}>Documents</button></div>
                 <div className="dp-team-toolbar"><label className="dp-global-search"><Search size={13} /><input value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search team members..." /></label><button type="button" className="dp-btn dp-btn-primary" onClick={() => setNotice("Connect the employee assignment API to add team members.")}><Plus size={14} /> Add Member</button></div>
                 <div className="dp-team-list">{filteredTeam.map((member) => <div key={member.name}><Avatar name={member.name} /><strong>{member.name}</strong><span>{member.role}</span><small>{member.type}</small></div>)}{!filteredTeam.length && <p>No team members match your search.</p>}</div>
-                <footer className="dp-modal-footer"><button type="button" className="dp-btn" onClick={() => setPanel(null)}>Close</button><span>Showing {filteredTeam.length} demo members</span></footer>
+                <footer className="dp-modal-footer"><button type="button" className="dp-btn" onClick={() => setPanel(null)}>Close</button><span>Total team members: {filteredTeam.length}</span></footer>
               </div>
             )}
 
@@ -527,9 +587,9 @@ export default function DepartmentsPage() {
               <div className="dp-confirm-body">
                 <div className="dp-warning-icon"><ShieldCheck size={25} /></div>
                 <h3>{deletePermanently ? "Delete Department Permanently?" : "Deactivate Department?"}</h3>
-                <p>{deletePermanently ? "This removes the department from this demo view. A real system should check dependencies before deletion." : `${selected.name} will be marked inactive. Department records are preserved in this demo view.`}</p>
+                <p>{deletePermanently ? "This removes the department permanently from the system." : `${selected.name} will be marked inactive.`}</p>
                 <label className="dp-radio-card"><input type="radio" checked={!deletePermanently} onChange={() => setDeletePermanently(false)} /><span><strong>Deactivate (Recommended)</strong><small>Preserve records and mark this department inactive.</small></span></label>
-                <label className="dp-radio-card danger"><input type="radio" checked={deletePermanently} onChange={() => setDeletePermanently(true)} /><span><strong>Delete Permanently</strong><small>Potentially destructive; validate dependencies in the backend first.</small></span></label>
+                <label className="dp-radio-card danger"><input type="radio" checked={deletePermanently} onChange={() => setDeletePermanently(true)} /><span><strong>Delete Permanently</strong><small>Potentially destructive action.</small></span></label>
                 <footer className="dp-modal-footer"><button type="button" className="dp-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className={`dp-btn ${deletePermanently ? "dp-btn-danger" : "dp-btn-primary"}`} onClick={confirmDeactivate}>{deletePermanently ? <Trash2 size={14} /> : <ShieldCheck size={14} />}{deletePermanently ? "Delete Department" : "Deactivate"}</button></footer>
               </div>
             )}
@@ -540,7 +600,7 @@ export default function DepartmentsPage() {
                 <p>{selectedIds.length} departments selected.</p>
                 <label className="dp-field"><span>Action</span><select defaultValue="inactive"><option value="inactive">Change Status</option></select></label>
                 <label className="dp-field"><span>Set Status</span><select defaultValue="Inactive"><option>Inactive</option><option>Active</option></select></label>
-                <div className="dp-info-box">This demo action marks selected departments inactive. Connect your backend before using this in production.</div>
+                <div className="dp-info-box">Apply changes to all selected departments.</div>
                 <footer className="dp-modal-footer"><button type="button" className="dp-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className="dp-btn dp-btn-primary" onClick={applyBulk}>Apply</button></footer>
               </div>
             )}

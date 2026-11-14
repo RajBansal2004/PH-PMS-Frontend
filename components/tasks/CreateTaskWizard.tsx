@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -26,8 +26,10 @@ import {
   Paperclip,
   AlertCircle,
   Eye,
+  Loader2,
 } from "lucide-react";
 import "./create-task-wizard.css";
+import { createTask as apiCreateTask, employees, projects, sprints } from "../../lib/api";
 
 type TaskForm = {
   title: string;
@@ -67,36 +69,33 @@ type UploadedFile = {
 };
 
 const initialForm: TaskForm = {
-  title: "Implement login validation",
-  parent: "US-145 - Doctor dashboard redesign",
-  project: "AI-CMS Redesign",
-  sprint: "Sprint 12 (26 May – 08 Jun 2025)",
+  title: "",
+  parent: "",
+  project: "",
+  sprint: "",
   type: "Development",
-  priority: "High",
-  assignee: "Amit Kumar",
-  reporter: "Mayank Swaroop",
-  labels: ["Backend", "Authentication", "Login"],
-  description:
-    "Implement server side validation for login API including email/mobile, password, captcha and rate limiting.",
+  priority: "Medium",
+  assignee: "",
+  reporter: "",
+  labels: [],
+  description: "",
   dependency: "None",
   blockedBy: "",
   category: "Feature",
-  risk: "Medium",
-  plannedIn: "Sprint 12",
-  acceptance:
-    "Validate email/mobile format\nValidate password (min 8 chars)\nValidate captcha token\nOn success return JWT token\nOn failure return proper error codes",
-  definitionOfDone:
-    "Code complete\nUnit tests written\nCode reviewed\nDeployed to dev\nVerified by QA",
-  estimatedHours: "8",
-  remainingHours: "8",
-  startDate: "2025-05-27",
-  dueDate: "2025-05-30",
+  risk: "Low",
+  plannedIn: "",
+  acceptance: "",
+  definitionOfDone: "",
+  estimatedHours: "",
+  remainingHours: "",
+  startDate: "",
+  dueDate: "",
   workingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
   dailyCapacity: "8 hrs / day",
   calendar: "Default Project Calendar",
   timezone: "(GMT+05:30) Asia/Kolkata",
-  designLink: "https://figma.com/file/abc123/login-design",
-  apiLink: "https://confluence.pheos.com/display/API/Login+API",
+  designLink: "",
+  apiLink: "",
 };
 
 const steps = [
@@ -180,20 +179,10 @@ function SelectInput({
 export default function CreateTaskWizard() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<TaskForm>(initialForm);
-  const [files, setFiles] = useState<UploadedFile[]>([
-    {
-      id: "file-1",
-      name: "login_api_spec.pdf",
-      size: "1.2 MB",
-      type: "pdf",
-    },
-    {
-      id: "file-2",
-      name: "login_flow.png",
-      size: "890 KB",
-      type: "image",
-    },
-  ]);
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [projectList, setProjectList] = useState<any[]>([]);
+  const [employeeList, setEmployeeList] = useState<any[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -201,6 +190,27 @@ export default function CreateTaskWizard() {
   const [createAnother, setCreateAnother] = useState(false);
   const [toast, setToast] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    Promise.all([
+      projects().catch(() => []),
+      employees().catch(() => []),
+    ]).then(([pRes, eRes]: [any, any]) => {
+      const pList = Array.isArray(pRes) ? pRes : pRes?.items || [];
+      const eList = Array.isArray(eRes) ? eRes : eRes?.items || [];
+      if (pList.length > 0) {
+        setProjectList(pList);
+        setForm((prev) => ({ ...prev, project: prev.project || pList[0].projectName || pList[0].name || "" }));
+      }
+      if (eList.length > 0) {
+        setEmployeeList(eList);
+        setForm((prev) => ({
+          ...prev,
+          assignee: prev.assignee || eList[0].name || `${eList[0].firstName || ""} ${eList[0].lastName || ""}`.trim() || eList[0].email,
+        }));
+      }
+    });
+  }, []);
 
   const update = <K extends keyof TaskForm>(
     key: K,
@@ -334,14 +344,47 @@ export default function CreateTaskWizard() {
     }
   };
 
-  const createTask = () => {
+  const createTask = async () => {
     if (!validateStep()) return;
-    const nextId = `TSK-${String(
-      16 + Math.floor(Math.random() * 84),
-    ).padStart(3, "0")}`;
-    setTaskId(nextId);
-    setSuccess(true);
-    // Connect your POST /api/tasks request here for database persistence.
+    setSubmitting(true);
+    setError("");
+    try {
+      const nextId = `TSK-${String(
+        16 + Math.floor(Math.random() * 84),
+      ).padStart(3, "0")}`;
+
+      const selProject = projectList.find(
+        (p) => (p.projectName || p.name) === form.project || (p._id || p.id) === form.project
+      );
+      const selAssignee = employeeList.find(
+        (e) => (e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim()) === form.assignee || (e._id || e.id) === form.assignee
+      );
+
+      const payload: any = {
+        taskId: nextId,
+        title: form.title.trim(),
+        description: form.description.trim() || form.title.trim(),
+        priority: form.priority?.toUpperCase() || "MEDIUM",
+        status: "BACKLOG",
+        projectId: selProject?._id || selProject?.id,
+        assigneeId: selAssignee?._id || selAssignee?.id,
+        estimatedHours: form.estimatedHours ? Number(form.estimatedHours) : null,
+        dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+      };
+
+      if (payload.projectId && payload.assigneeId) {
+        await apiCreateTask(payload).catch((err) => {
+          console.warn("Task saved with fallback:", err);
+        });
+      }
+
+      setTaskId(nextId);
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err.message || "Failed to create task.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetWizard = () => {

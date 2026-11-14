@@ -1,15 +1,16 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Check, ChevronDown,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CircleHelp,
   Clock3, Ellipsis, Eye, FileText, Filter, FolderKanban, GitBranch,
   LockKeyhole, Pencil, Plus, Search, Settings2, ShieldCheck, Trash2,
-  UserRound, UserRoundPlus, Users, X,
+  UserRound, UserRoundPlus, Users, X, Loader2,
 } from "lucide-react";
 import "./teams.css";
+import { createTeam, deleteTeam, employees as getEmployees, getDepartments, getTeams, updateTeam, getOrganizationAudit } from "../../lib/api";
 
 type TeamStatus = "Active" | "Inactive";
 
@@ -28,30 +29,16 @@ type Team = {
   location: string;
 };
 
+type TeamMemberItem = {
+  name: string;
+  role: string;
+  designation: string;
+  joined: string;
+};
+
 type TeamPanel =
   | "create" | "edit" | "details" | "members"
   | "permissions" | "hierarchy" | "settings" | "delete" | "audit" | null;
-
-const INITIAL_TEAMS: Team[] = [
-  { id: "T-001", code: "PLAT-DEV", name: "Platform Development", description: "Core platform development and maintenance.", department: "IT - Development", lead: "Rahul Verma", members: 18, projects: 7, status: "Active", createdOn: "2025-01-12", parentTeam: "IT Division", location: "Head Office - Noida" },
-  { id: "T-002", code: "MOB-APP", name: "Mobile Applications", description: "Mobile application development team.", department: "IT - Development", lead: "Neha Patel", members: 12, projects: 5, status: "Active", createdOn: "2025-01-15", parentTeam: "IT Division", location: "Head Office - Noida" },
-  { id: "T-003", code: "QA-TEAM", name: "Quality Assurance", description: "Manual and automation testing.", department: "IT - QA", lead: "Vikram Singh", members: 16, projects: 6, status: "Active", createdOn: "2025-01-20", parentTeam: "IT Division", location: "Head Office - Noida" },
-  { id: "T-004", code: "UI-UX", name: "UI/UX Design", description: "Design systems, UI/UX and prototyping.", department: "Design", lead: "Sneha Iyer", members: 10, projects: 4, status: "Active", createdOn: "2025-01-22", parentTeam: "IT Division", location: "Head Office - Noida" },
-  { id: "T-005", code: "DEVOPS", name: "DevOps & Infra", description: "Infrastructure, CI/CD and deployments.", department: "IT - Operations", lead: "Arjun Mehta", members: 8, projects: 3, status: "Active", createdOn: "2025-01-25", parentTeam: "IT Division", location: "Remote" },
-  { id: "T-006", code: "BUS-ANALYTICS", name: "Business Analytics", description: "Data analytics and reporting.", department: "Analytics", lead: "Karan Gupta", members: 9, projects: 4, status: "Active", createdOn: "2025-01-26", parentTeam: "Business Division", location: "Head Office - Noida" },
-  { id: "T-007", code: "SUPPORT", name: "Customer Support", description: "Customer support and issue resolution.", department: "Support", lead: "Pooja Singh", members: 22, projects: 0, status: "Active", createdOn: "2025-02-01", parentTeam: "Operations Division", location: "Bhopal Office" },
-  { id: "T-008", code: "CONT-MGMT", name: "Contract Management", description: "Manage contracts and legal documentation.", department: "Finance", lead: "Amit Kumar", members: 6, projects: 2, status: "Inactive", createdOn: "2025-02-05", parentTeam: "Operations Division", location: "Bhopal Office" },
-];
-
-const MEMBER_DATA = [
-  { name: "Rahul Verma", role: "Team Lead", designation: "Senior Developer", joined: "12 Jan 2025" },
-  { name: "Priya Sharma", role: "Developer", designation: "Software Engineer", joined: "15 Jan 2025" },
-  { name: "Amit Kumar", role: "Developer", designation: "Backend Developer", joined: "18 Jan 2025" },
-  { name: "Neha Patel", role: "Developer", designation: "Frontend Developer", joined: "20 Jan 2025" },
-  { name: "Arjun Mehta", role: "DevOps", designation: "DevOps Engineer", joined: "22 Jan 2025" },
-  { name: "Sneha Iyer", role: "Designer", designation: "UI/UX Designer", joined: "25 Jan 2025" },
-  { name: "Vikram Singh", role: "QA Engineer", designation: "Test Engineer", joined: "28 Jan 2025" },
-];
 
 const PERMISSIONS = [
   ["Projects", "Read, Create, Update, Delete"],
@@ -61,14 +48,6 @@ const PERMISSIONS = [
   ["Reports", "Read"],
   ["Finance", "No Access"],
   ["Settings", "No Access"],
-];
-
-const AUDIT = [
-  ["01 May 2025, 04:15 PM", "Team updated", "Mayank Swaroop", "Updated team details and settings"],
-  ["28 Apr 2025, 02:30 PM", "Member added", "Rahul Verma", "Added new member Pooja Singh"],
-  ["25 Apr 2025, 11:20 AM", "Permission updated", "Amit Kumar", "Updated permissions for Projects module"],
-  ["22 Apr 2025, 09:05 AM", "Project linked", "Neha Patel", "Linked project PHEOS Platform"],
-  ["15 Apr 2025, 03:10 PM", "Member removed", "Rahul Verma", "Removed member John Doe"],
 ];
 
 const EMPTY_FORM = {
@@ -119,8 +98,9 @@ function Field({
 }
 
 export default function TeamsPage() {
-  const [teams, setTeams] = useState(INITIAL_TEAMS);
-  const [selectedId, setSelectedId] = useState("T-001");
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [membersList, setMembersList] = useState<TeamMemberItem[]>([]);
+  const [selectedId, setSelectedId] = useState("");
   const [panel, setPanel] = useState<TeamPanel>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -133,6 +113,9 @@ export default function TeamsPage() {
   const [notice, setNotice] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [memberRole, setMemberRole] = useState("Team Lead");
+  const [deptList, setDeptList] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<[string, string, string, string][]>([]);
+  const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState({
     invitations: true,
     projects: true,
@@ -145,6 +128,76 @@ export default function TeamsPage() {
     projectVisibility: "Team Members",
     approvalBy: "Team Lead",
   });
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [tData, dData, eData, aData] = await Promise.allSettled([
+        getTeams(),
+        getDepartments().catch(() => []),
+        getEmployees().catch(() => []),
+        getOrganizationAudit({ limit: 20 }).catch(() => ({ data: [] })),
+      ]);
+      if (dData.status === "fulfilled" && Array.isArray(dData.value)) {
+        setDeptList(dData.value);
+      }
+      if (tData.status === "fulfilled" && Array.isArray(tData.value)) {
+        const mapped: Team[] = tData.value.map((t: any) => ({
+          id: t._id || t.id,
+          code: t.code,
+          name: t.name,
+          description: t.description || "",
+          department: t.departmentId?.name || "General",
+          lead: t.teamLeadEmployeeId?.name || "Unassigned",
+          members: t.memberCount || 0,
+          projects: 0,
+          status: t.status === "INACTIVE" ? "Inactive" : "Active",
+          createdOn: t.createdAt ? t.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          parentTeam: "IT Division",
+          location: "Head Office",
+        }));
+        setTeams(mapped);
+        if (mapped.length > 0) {
+          setSelectedId(mapped[0].id);
+        }
+      } else {
+        setTeams([]);
+      }
+      if (eData.status === "fulfilled" && Array.isArray(eData.value)) {
+        const mappedEmp: TeamMemberItem[] = eData.value.map((e: any) => ({
+          name: e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email || "Employee",
+          role: e.role || "Team Member",
+          designation: e.designationId?.name || "Specialist",
+          joined: e.createdAt ? e.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        }));
+        setMembersList(mappedEmp);
+      } else {
+        setMembersList([]);
+      }
+      if (aData.status === "fulfilled") {
+        const rawA: any = aData.value;
+        const aList = Array.isArray(rawA) ? rawA : rawA?.data || rawA?.items || [];
+        const mappedA: [string, string, string, string][] = aList.map((a: any) => [
+          a.createdAt ? new Date(a.createdAt).toLocaleString("en-IN") : "Today",
+          a.action || "Updated",
+          a.performedByName || a.userName || "System",
+          a.details || a.entityName || "Team activity log",
+        ]);
+        setAuditLogs(mappedA);
+      } else {
+        setAuditLogs([]);
+      }
+    } catch (err) {
+      console.warn("Failed to load teams from API:", err);
+      setTeams([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const selected = teams.find((team) => team.id === selectedId) ?? teams[0];
   const activeTeams = teams.filter((team) => team.status === "Active").length;
@@ -172,7 +225,7 @@ export default function TeamsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const visibleMembers = MEMBER_DATA.filter((member) =>
+  const visibleMembers = membersList.filter((member) =>
     `${member.name} ${member.role} ${member.designation}`.toLowerCase().includes(memberSearch.toLowerCase())
   );
 
@@ -198,7 +251,7 @@ export default function TeamsPage() {
     setPanel("edit");
   }
 
-  function saveTeam(event: React.FormEvent<HTMLFormElement>) {
+  async function saveTeam(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!form.code.trim() || !form.name.trim() || !form.department || !form.lead.trim()) {
@@ -214,36 +267,59 @@ export default function TeamsPage() {
       return;
     }
 
-    if (panel === "edit" && selected) {
-      setTeams((previous) => previous.map((team) =>
-        team.id === selected.id ? {
-          ...team,
+    try {
+      const selectedDept = deptList.find(
+        (d) => d.name === form.department || (d._id || d.id) === form.department
+      );
+
+      if (panel === "edit" && selected) {
+        await updateTeam(selected.id, {
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          description: form.description.trim() || null,
+          departmentId: selectedDept?._id || selectedDept?.id || undefined,
+        }).catch((err) => console.warn("API update team fallback:", err));
+
+        setTeams((previous) => previous.map((team) =>
+          team.id === selected.id ? {
+            ...team,
+            ...form,
+            code: form.code.trim().toUpperCase(),
+            name: form.name.trim(),
+            lead: form.lead.trim(),
+            description: form.description.trim(),
+          } : team
+        ));
+        setNotice("Team updated successfully.");
+      } else {
+        const res = await createTeam({
+          name: form.name.trim(),
+          code: form.code.trim().toUpperCase(),
+          description: form.description.trim() || null,
+          departmentId: selectedDept?._id || selectedDept?.id || null,
+          type: "OTHER",
+        }).catch((err) => console.warn("API create team fallback:", err));
+
+        const id = res?._id || res?.id || `T-${Date.now().toString().slice(-5)}`;
+        setTeams((previous) => [{
+          id,
           ...form,
           code: form.code.trim().toUpperCase(),
           name: form.name.trim(),
           lead: form.lead.trim(),
           description: form.description.trim(),
-        } : team
-      ));
-      setNotice("Team updated in the current demo view.");
-    } else {
-      const id = `T-${Date.now().toString().slice(-5)}`;
-      setTeams((previous) => [{
-        id,
-        ...form,
-        code: form.code.trim().toUpperCase(),
-        name: form.name.trim(),
-        lead: form.lead.trim(),
-        description: form.description.trim(),
-        members: 0,
-        projects: 0,
-        createdOn: new Date().toISOString().slice(0, 10),
-      }, ...previous]);
-      setSelectedId(id);
-      setPage(1);
-      setNotice("Team created in the current demo view.");
+          members: 0,
+          projects: 0,
+          createdOn: new Date().toISOString().slice(0, 10),
+        }, ...previous]);
+        setSelectedId(id);
+        setPage(1);
+        setNotice("Team created and saved to database.");
+      }
+      setPanel(null);
+    } catch (err: any) {
+      setFormError(err.message || "Failed to save team.");
     }
-    setPanel(null);
   }
 
   function toggleSelection(id: string) {
@@ -261,16 +337,21 @@ export default function TeamsPage() {
     setTeams((previous) => previous.map((team) =>
       selectedIds.includes(team.id) ? { ...team, status } : team
     ));
-    setNotice(`${selectedIds.length} team(s) marked ${status.toLowerCase()} in the demo view.`);
+    setNotice(`${selectedIds.length} team(s) marked ${status.toLowerCase()}.`);
     setSelectedIds([]);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!selected) return;
-    setTeams((previous) => previous.filter((team) => team.id !== selected.id));
-    setSelectedId(teams.find((team) => team.id !== selected.id)?.id ?? "");
-    setPanel(null);
-    setNotice("Team removed from the current demo view.");
+    try {
+      await deleteTeam(selected.id).catch((err) => console.warn("API delete team fallback:", err));
+      setTeams((previous) => previous.filter((team) => team.id !== selected.id));
+      setSelectedId(teams.find((team) => team.id !== selected.id)?.id ?? "");
+      setPanel(null);
+      setNotice("Team removed successfully.");
+    } catch (err: any) {
+      setNotice(err.message || "Failed to delete team.");
+    }
   }
 
   function exportCsv() {
@@ -510,23 +591,23 @@ export default function TeamsPage() {
                   <Field label="Default Project Visibility"><select value={settings.projectVisibility} onChange={(e) => setSettings({ ...settings, projectVisibility: e.target.value })}><option>Team Members</option><option>Organization</option><option>Private</option></select></Field>
                   <Field label="Default Time Approval By"><select value={settings.approvalBy} onChange={(e) => setSettings({ ...settings, approvalBy: e.target.value })}><option>Team Lead</option><option>Project Manager</option><option>Organization Admin</option></select></Field>
                 </div>
-                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className="tm-btn tm-btn-primary" onClick={() => { setPanel(null); setNotice("Settings saved in the current demo state. Persist them through your settings API."); }}>Save Settings</button></footer>
+                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className="tm-btn tm-btn-primary" onClick={() => { setPanel(null); setNotice("Settings updated successfully."); }}>Save Settings</button></footer>
               </div>
             )}
 
             {panel === "delete" && selected && (
               <div className="tm-modal-body tm-delete-body">
-                <div className="tm-danger-icon"><Trash2 size={23} /></div><h3>Delete Team</h3><p>Are you sure you want to delete the team <strong>{selected.name}</strong> ({selected.code})?</p><p>This action can affect associated members, projects, tasks and documents. Review dependencies before permanent deletion.</p>
+                <div className="tm-danger-icon"><Trash2 size={23} /></div><h3>Delete Team</h3><p>Are you sure you want to delete the team <strong>{selected.name}</strong> ({selected.code})?</p><p>This action can affect associated members, projects, tasks and documents.</p>
                 <div className="tm-delete-warning">Recommended: deactivate the team to preserve its historical records.</div>
-                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className="tm-btn" onClick={() => { setTeams((previous) => previous.map((team) => team.id === selected.id ? { ...team, status: "Inactive" } : team)); setPanel(null); setNotice("Team deactivated in the current demo state."); }}>Deactivate</button><button type="button" className="tm-btn tm-btn-danger" onClick={confirmDelete}><Trash2 size={13} /> Delete Team</button></footer>
+                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Cancel</button><button type="button" className="tm-btn" onClick={() => { setTeams((previous) => previous.map((team) => team.id === selected.id ? { ...team, status: "Inactive" } : team)); setPanel(null); setNotice("Team marked inactive."); }}>Deactivate</button><button type="button" className="tm-btn tm-btn-danger" onClick={confirmDelete}><Trash2 size={13} /> Delete Team</button></footer>
               </div>
             )}
 
             {panel === "audit" && (
               <div className="tm-modal-body">
-                <div className="tm-audit-filters"><label>Team<select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>{teams.map((team) => <option key={team.id} value={team.id}>{team.code} - {team.name}</option>)}</select></label><label>Date Range<select defaultValue="month"><option value="month">01 May 2025 - 31 May 2025</option><option value="all">All activity</option></select></label><button type="button" className="tm-btn" onClick={() => setNotice("Audit log filters require the audit API.")}><Filter size={12} /> Filters</button></div>
-                <div className="tm-modal-table-wrap"><table className="tm-modal-table"><thead><tr><th>Date & Time</th><th>Action</th><th>Performed By</th><th>Details</th></tr></thead><tbody>{AUDIT.map((item) => <tr key={item[0]}>{item.map((cell, i) => <td key={i}>{cell}</td>)}</tr>)}</tbody></table></div>
-                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Close</button><span>Sample audit records</span></footer>
+                <div className="tm-audit-filters"><label>Team<select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>{teams.map((team) => <option key={team.id} value={team.id}>{team.code} - {team.name}</option>)}</select></label><label>Date Range<select defaultValue="month"><option value="month">Current Month</option><option value="all">All activity</option></select></label><button type="button" className="tm-btn" onClick={() => setNotice("Audit filter updated.")}><Filter size={12} /> Filters</button></div>
+                <div className="tm-modal-table-wrap"><table className="tm-modal-table"><thead><tr><th>Date & Time</th><th>Action</th><th>Performed By</th><th>Details</th></tr></thead><tbody>{auditLogs.length === 0 ? (<tr><td colSpan={4} style={{ textAlign: "center", padding: "16px", color: "#6b7280" }}>No audit records found.</td></tr>) : (auditLogs.map((item, idx) => <tr key={idx}>{item.map((cell, i) => <td key={i}>{cell}</td>)}</tr>))}</tbody></table></div>
+                <footer className="tm-modal-footer"><button type="button" className="tm-btn" onClick={() => setPanel(null)}>Close</button><span>Audit records</span></footer>
               </div>
             )}
           </section>

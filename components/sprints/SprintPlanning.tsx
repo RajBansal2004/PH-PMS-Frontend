@@ -1,7 +1,6 @@
-
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -30,6 +29,14 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import {
+  sprints as getSprints,
+  updateSprint as apiUpdateSprint,
+  requirements as getRequirements,
+  tasks as getTasks,
+  employees as getEmployees,
+  getOrganizationAudit,
+} from "@/lib/api";
 import "./sprint-planning.css";
 
 type BacklogItem = {
@@ -39,11 +46,11 @@ type BacklogItem = {
   module: string;
   priority: "High" | "Medium" | "Low";
   points: number;
-  status: "Approved" | "In Review" | "Draft";
+  status: string;
 };
 
 type TeamMember = {
-  id: number;
+  id: string;
   name: string;
   role: string;
   availability: number;
@@ -77,50 +84,6 @@ type TabKey =
   | "dependencies"
   | "risks"
   | "review";
-
-const initialBacklog: BacklogItem[] = [
-  { id: "REQ-021", title: "Patient Profile Management", type: "Requirement", module: "Patient Management", priority: "High", points: 8, status: "Approved" },
-  { id: "REQ-022", title: "Profile Image Upload", type: "Requirement", module: "Patient Management", priority: "High", points: 5, status: "Approved" },
-  { id: "REQ-023", title: "Medical History Section", type: "Requirement", module: "Patient Management", priority: "High", points: 8, status: "Approved" },
-  { id: "REQ-024", title: "Allergy Information", type: "Requirement", module: "Patient Management", priority: "Medium", points: 3, status: "Approved" },
-  { id: "REQ-025", title: "Social History", type: "Requirement", module: "Patient Management", priority: "Medium", points: 2, status: "Approved" },
-  { id: "REQ-026", title: "Insurance Information", type: "Requirement", module: "Patient Management", priority: "Low", points: 3, status: "In Review" },
-  { id: "REQ-027", title: "Edit Profile", type: "Requirement", module: "Patient Management", priority: "Medium", points: 5, status: "Approved" },
-  { id: "REQ-028", title: "Profile Audit Trail", type: "Requirement", module: "Patient Management", priority: "Low", points: 2, status: "Draft" },
-  { id: "REQ-029", title: "Export Profile PDF", type: "Requirement", module: "Patient Management", priority: "Low", points: 2, status: "In Review" },
-  { id: "REQ-030", title: "Profile Search & Filter", type: "Requirement", module: "Patient Management", priority: "Medium", points: 7, status: "Approved" },
-  { id: "TAS-121", title: "Profile API Development", type: "Task", module: "Backend", priority: "High", points: 3, status: "Approved" },
-  { id: "TAS-122", title: "Profile UI Implementation", type: "Task", module: "Frontend", priority: "High", points: 4, status: "Approved" },
-  { id: "TAS-123", title: "Unit & Integration Testing", type: "Task", module: "QA", priority: "Medium", points: 3, status: "Approved" },
-  { id: "TAS-124", title: "Documentation Update", type: "Task", module: "Documentation", priority: "Low", points: 2, status: "Draft" },
-];
-
-const initialSelected = [
-  "REQ-021", "REQ-022", "REQ-023", "REQ-024",
-  "REQ-027", "REQ-030", "TAS-121", "TAS-122",
-  "TAS-123", "TAS-124",
-];
-
-const initialTeam: TeamMember[] = [
-  { id: 1, name: "Neha Patel", role: "Tech Lead", availability: 100, capacity: 80, committed: 64, initials: "NP" },
-  { id: 2, name: "Rahul Verma", role: "Developer", availability: 100, capacity: 80, committed: 72, initials: "RV" },
-  { id: 3, name: "Amit Kumar", role: "Developer", availability: 100, capacity: 80, committed: 72, initials: "AK" },
-  { id: 4, name: "Pooja Singh", role: "QA Engineer", availability: 100, capacity: 60, committed: 48, initials: "PS" },
-  { id: 5, name: "Vikram Singh", role: "UI/UX Designer", availability: 100, capacity: 60, committed: 48, initials: "VS" },
-];
-
-const initialDependencies: Dependency[] = [
-  { id: 1, type: "Requirement", itemId: "REQ-023", title: "Medical History Section", dependsOn: "REQ-021", impact: "High" },
-  { id: 2, type: "Requirement", itemId: "REQ-024", title: "Allergy Information", dependsOn: "REQ-021", impact: "Medium" },
-  { id: 3, type: "Task", itemId: "TAS-121", title: "Profile API Development", dependsOn: "REQ-021", impact: "High" },
-  { id: 4, type: "Task", itemId: "TAS-122", title: "Profile UI Implementation", dependsOn: "TAS-121", impact: "Medium" },
-];
-
-const initialRisks: Risk[] = [
-  { id: 1, type: "Risk", description: "API response time dependency", impact: "High", probability: "Medium", owner: "Amit Kumar" },
-  { id: 2, type: "Risk", description: "Third party image storage", impact: "Medium", probability: "Medium", owner: "Rahul Verma" },
-  { id: 3, type: "Assumption", description: "UI/UX designs will be finalized", impact: "Low", probability: "High", owner: "Vikram Singh" },
-];
 
 const tabs: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "scope", label: "1. Scope & Backlog", icon: ClipboardCheck },
@@ -159,16 +122,20 @@ function Panel({
 
 export default function SprintPlanning({ sprintId }: { sprintId: string }) {
   const [activeTab, setActiveTab] = useState<TabKey>("scope");
-  const [backlog, setBacklog] = useState(initialBacklog);
-  const [selectedIds, setSelectedIds] = useState<string[]>(initialSelected);
-  const [team, setTeam] = useState(initialTeam);
-  const [dependencies, setDependencies] = useState(initialDependencies);
-  const [risks, setRisks] = useState(initialRisks);
+  const [sprint, setSprint] = useState<any>(null);
+  const [backlog, setBacklog] = useState<BacklogItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [risks, setRisks] = useState<Risk[]>([]);
+  const [activities, setActivities] = useState<[string, string][]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
-  const [startDate, setStartDate] = useState("2025-05-26");
-  const [endDate, setEndDate] = useState("2025-06-08");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [standupTime, setStandupTime] = useState("09:30");
   const [timeZone, setTimeZone] = useState("(GMT+05:30) India Standard Time");
   const [workingDays, setWorkingDays] = useState(["Mon", "Tue", "Wed", "Thu", "Fri"]);
@@ -178,17 +145,157 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
   const [dependencyItem, setDependencyItem] = useState("");
   const [dependencyOn, setDependencyOn] = useState("");
   const [riskDescription, setRiskDescription] = useState("");
-  const [riskOwner, setRiskOwner] = useState("Amit Kumar");
+  const [riskOwner, setRiskOwner] = useState("");
   const [riskType, setRiskType] = useState<"Risk" | "Assumption">("Risk");
   const [riskImpact, setRiskImpact] = useState<"High" | "Medium" | "Low">("Medium");
   const [riskProbability, setRiskProbability] = useState<"High" | "Medium" | "Low">("Medium");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [showAllBacklog, setShowAllBacklog] = useState(false);
 
-  const sprintName = "Patient Profile Sprint";
-  const milestoneName = "MLS-002 — Module Development";
-  const sprintOwner = "Neha Patel";
-  const priority = "High";
+  const getInitials = (name: string) => {
+    if (!name) return "TM";
+    return name
+      .split(" ")
+      .map((part) => part[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  };
+
+  const notify = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 3000);
+  };
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [sRes, rRes, tRes, eRes, aRes] = await Promise.allSettled([
+          getSprints(),
+          getRequirements(),
+          getTasks(),
+          getEmployees(),
+          getOrganizationAudit({ limit: 10 }).catch(() => ({ data: [] })),
+        ]);
+
+        let matchedSprint: any = null;
+        if (sRes.status === "fulfilled") {
+          const sList = Array.isArray(sRes.value) ? sRes.value : sRes.value?.data || sRes.value?.items || [];
+          matchedSprint = sList.find(
+            (s: any) =>
+              s._id === sprintId ||
+              s.id === sprintId ||
+              (s.sprintCode && s.sprintCode.toLowerCase() === sprintId.toLowerCase()) ||
+              (s.code && s.code.toLowerCase() === sprintId.toLowerCase())
+          ) || sList[0] || null;
+
+          if (matchedSprint) {
+            setSprint(matchedSprint);
+            if (matchedSprint.startDate) {
+              setStartDate(new Date(matchedSprint.startDate).toISOString().slice(0, 10));
+            }
+            if (matchedSprint.endDate) {
+              setEndDate(new Date(matchedSprint.endDate).toISOString().slice(0, 10));
+            }
+          }
+        }
+
+        // Backlog items from Requirements & Tasks
+        const backlogItems: BacklogItem[] = [];
+        if (rRes.status === "fulfilled") {
+          const rList = Array.isArray(rRes.value) ? rRes.value : rRes.value?.data || rRes.value?.items || [];
+          rList.forEach((r: any) => {
+            backlogItems.push({
+              id: r.reqId || r.code || `REQ-${String(r._id || r.id).slice(-3).toUpperCase()}`,
+              title: r.title || "Untitled Requirement",
+              type: "Requirement",
+              module: r.module || r.category || "General",
+              priority: (r.priority || "Medium") as "High" | "Medium" | "Low",
+              points: Number(r.storyPoints || r.points || 5),
+              status: r.status || "Draft",
+            });
+          });
+        }
+
+        if (tRes.status === "fulfilled") {
+          const tList = Array.isArray(tRes.value) ? tRes.value : tRes.value?.data || tRes.value?.items || [];
+          tList.forEach((t: any) => {
+            backlogItems.push({
+              id: t.taskId || t.code || `TAS-${String(t._id || t.id).slice(-3).toUpperCase()}`,
+              title: t.title || "Untitled Task",
+              type: "Task",
+              module: t.module || "General",
+              priority: (t.priority || "Medium") as "High" | "Medium" | "Low",
+              points: Number(t.estimatedHours ? Math.round(t.estimatedHours / 4) : 3),
+              status: t.status || "Draft",
+            });
+          });
+        }
+        setBacklog(backlogItems);
+
+        // Employees
+        if (eRes.status === "fulfilled") {
+          const eList = Array.isArray(eRes.value) ? eRes.value : eRes.value?.data || eRes.value?.items || [];
+          const mappedTeam: TeamMember[] = eList.map((emp: any) => {
+            const empName = emp.name || emp.fullName || [emp.firstName, emp.lastName].filter(Boolean).join(" ") || "Employee";
+            return {
+              id: emp._id || emp.id,
+              name: empName,
+              role: emp.designation?.name || emp.role || "Developer",
+              availability: 100,
+              capacity: 80,
+              committed: 0,
+              initials: getInitials(empName),
+            };
+          });
+          setTeam(mappedTeam);
+          if (mappedTeam.length > 0) {
+            setRiskOwner(mappedTeam[0].name);
+          }
+        }
+
+        // Audit Activity
+        if (aRes.status === "fulfilled") {
+          const rawA: any = aRes.value;
+          const aList = Array.isArray(rawA) ? rawA : rawA?.data || rawA?.items || [];
+          const mappedAudit: [string, string][] = aList.map((item: any) => [
+            item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Today",
+            `${item.performedByName || item.userName || "User"} ${item.action || "updated"} ${item.entityName || item.entityType || "Sprint"}`,
+          ]);
+          setActivities(mappedAudit);
+        }
+
+        // Restore any draft saved in localStorage
+        try {
+          const savedDraft = localStorage.getItem(`sprint-planning-${sprintId}`);
+          if (savedDraft) {
+            const parsed = JSON.parse(savedDraft);
+            if (Array.isArray(parsed.selectedIds)) setSelectedIds(parsed.selectedIds);
+            if (Array.isArray(parsed.dependencies)) setDependencies(parsed.dependencies);
+            if (Array.isArray(parsed.risks)) setRisks(parsed.risks);
+            if (parsed.startDate) setStartDate(parsed.startDate);
+            if (parsed.endDate) setEndDate(parsed.endDate);
+            if (parsed.standupTime) setStandupTime(parsed.standupTime);
+          }
+        } catch {
+          // ignore draft parsing errors
+        }
+      } catch (err: any) {
+        notify(`Failed to fetch planning data: ${err?.message || "Server error"}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [sprintId]);
+
+  const sprintName = sprint?.name || `Sprint ${sprintId}`;
+  const milestoneName = sprint?.milestoneId?.name || "Sprint Milestone";
+  const sprintOwner = sprint?.ownerId?.name || sprint?.owner?.name || "Sprint Lead";
+  const sprintPriority = sprint?.priority || "High";
 
   const selectedItems = useMemo(
     () => backlog.filter((item) => selectedIds.includes(item.id)),
@@ -204,8 +311,8 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
     .reduce((sum, item) => sum + item.points, 0);
   const totalCapacity = team.reduce((sum, member) => sum + member.capacity, 0);
   const committedCapacity = team.reduce((sum, member) => sum + member.committed, 0);
-  const remainingCapacity = totalCapacity - committedCapacity;
-  const utilization = totalCapacity ? Math.round((committedCapacity / totalCapacity) * 10000) / 100 : 0;
+  const remainingCapacity = Math.max(0, totalCapacity - committedCapacity);
+  const utilization = totalCapacity ? Math.round((committedCapacity / totalCapacity) * 100) : 0;
   const duration = startDate && endDate
     ? Math.max(0, Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86400000) + 1)
     : 0;
@@ -223,11 +330,6 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
     const matchesPriority = priorityFilter === "All" || item.priority === priorityFilter;
     return matchesSearch && matchesType && matchesPriority;
   });
-
-  const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2800);
-  };
 
   const toggleSelected = (id: string) => {
     setSelectedIds((current) =>
@@ -248,6 +350,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
     }
     const item = backlog.find((entry) => entry.id === dependencyItem);
     if (!item) return;
+
     setDependencies((current) => [
       ...current,
       {
@@ -278,7 +381,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         description: riskDescription.trim(),
         impact: riskImpact,
         probability: riskProbability,
-        owner: riskOwner,
+        owner: riskOwner || "Team",
       },
     ]);
     setRiskDescription("");
@@ -301,7 +404,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
       updatedAt: new Date().toISOString(),
     };
     localStorage.setItem(`sprint-planning-${sprintId}`, JSON.stringify(draft));
-    notify("Sprint planning draft saved in this browser.");
+    notify("Sprint planning draft saved.");
   };
 
   const recalculate = () => notify("Sprint capacity and story point totals recalculated.");
@@ -318,6 +421,21 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
       return;
     }
     setActiveTab("review");
+  };
+
+  const confirmSprintPlan = async () => {
+    try {
+      if (sprint?._id) {
+        await apiUpdateSprint(sprint._id, {
+          status: "ACTIVE",
+          startDate: startDate ? new Date(startDate) : undefined,
+          endDate: endDate ? new Date(endDate) : undefined,
+        });
+      }
+      notify("Sprint plan committed successfully. Sprint is now Active.");
+    } catch (err: any) {
+      notify(`Could not commit sprint plan: ${err?.message || "API error"}`);
+    }
   };
 
   const formatDate = (value: string) =>
@@ -387,15 +505,17 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
                     <td><Badge tone={item.status}>{item.status}</Badge></td>
                   </tr>
                 ))}
-                {!filteredBacklog.length && <tr><td colSpan={8} className="sp-empty">No backlog items match your filters.</td></tr>}
+                {!filteredBacklog.length && <tr><td colSpan={8} className="sp-empty">No backlog items found. Create requirements or tasks to plan this sprint.</td></tr>}
               </tbody>
             </table>
           </div>
           <div className="sp-table-footer">
             <span>Showing {Math.min(showAllBacklog ? filteredBacklog.length : 10, filteredBacklog.length)} of {filteredBacklog.length} items</span>
-            <button className="sp-text-button" onClick={() => setShowAllBacklog((value) => !value)}>
-              {showAllBacklog ? "Show Less" : "Show All"}
-            </button>
+            {filteredBacklog.length > 10 && (
+              <button className="sp-text-button" onClick={() => setShowAllBacklog((value) => !value)}>
+                {showAllBacklog ? "Show Less" : "Show All"}
+              </button>
+            )}
             <strong>Selected Story Points: {totalPoints} SP</strong>
           </div>
         </Panel>
@@ -433,31 +553,35 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
 
       <div className="sp-lower-grid">
         <Panel title="Team & Capacity Overview">
-          <div className="sp-table-wrap">
-            <table className="sp-table sp-team-table">
-              <thead>
-                <tr><th>Member</th><th>Role</th><th>Availability</th><th>Capacity (h)</th><th>Committed (h)</th><th>Utilization</th></tr>
-              </thead>
-              <tbody>
-                {team.map((member) => (
-                  <tr key={member.id}>
-                    <td><span className="sp-person"><span className="sp-avatar">{member.initials}</span>{member.name}</span></td>
-                    <td>{member.role}</td>
-                    <td>{member.availability}%</td>
-                    <td>{member.capacity}h</td>
-                    <td>{member.committed}h</td>
-                    <td>
-                      <span className="sp-utilization">
-                        <span className="sp-progress"><span className="sp-fill-green" style={{ width: `${Math.min(100, member.committed / Math.max(1, member.capacity) * 100)}%` }} /></span>
-                        {Math.round(member.committed / Math.max(1, member.capacity) * 100)}%
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot><tr><td colSpan={3}>Total</td><td>{totalCapacity}h</td><td>{committedCapacity}h</td><td>{utilization}%</td></tr></tfoot>
-            </table>
-          </div>
+          {team.length === 0 ? (
+            <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>No employees found in directory.</div>
+          ) : (
+            <div className="sp-table-wrap">
+              <table className="sp-table sp-team-table">
+                <thead>
+                  <tr><th>Member</th><th>Role</th><th>Availability</th><th>Capacity (h)</th><th>Committed (h)</th><th>Utilization</th></tr>
+                </thead>
+                <tbody>
+                  {team.map((member) => (
+                    <tr key={member.id}>
+                      <td><span className="sp-person"><span className="sp-avatar">{member.initials}</span>{member.name}</span></td>
+                      <td>{member.role}</td>
+                      <td>{member.availability}%</td>
+                      <td>{member.capacity}h</td>
+                      <td>{member.committed}h</td>
+                      <td>
+                        <span className="sp-utilization">
+                          <span className="sp-progress"><span className="sp-fill-green" style={{ width: `${Math.min(100, member.committed / Math.max(1, member.capacity) * 100)}%` }} /></span>
+                          {Math.round(member.committed / Math.max(1, member.capacity) * 100)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot><tr><td colSpan={3}>Total</td><td>{totalCapacity}h</td><td>{committedCapacity}h</td><td>{utilization}%</td></tr></tfoot>
+              </table>
+            </div>
+          )}
         </Panel>
 
         <Panel title="Capacity vs Commitment" action={<Info size={13} />}>
@@ -466,18 +590,18 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
             <div className="sp-chart-area">
               <div className="sp-chart-column">
                 <strong>{totalCapacity}h</strong>
-                <span className="sp-chart-bar blue" style={{ height: `${Math.min(100, totalCapacity / 400 * 100)}%` }} />
+                <span className="sp-chart-bar blue" style={{ height: `${Math.min(100, (totalCapacity / 400) * 100)}%` }} />
                 <small>Total Capacity</small>
               </div>
               <div className="sp-chart-column">
                 <strong>{committedCapacity}h</strong>
-                <span className="sp-chart-bar green" style={{ height: `${Math.min(100, committedCapacity / 400 * 100)}%` }} />
+                <span className="sp-chart-bar green" style={{ height: `${Math.min(100, (committedCapacity / 400) * 100)}%` }} />
                 <small>Committed Capacity</small>
               </div>
             </div>
           </div>
           <div className="sp-chart-legend"><span><i className="blue" />Total Capacity</span><span><i className="green" />Committed Capacity</span></div>
-          <div className="sp-remaining"><span>Remaining Capacity</span><strong>{remainingCapacity}h<small>({Math.max(0, 100 - utilization).toFixed(2)}%)</small></strong></div>
+          <div className="sp-remaining"><span>Remaining Capacity</span><strong>{remainingCapacity}h</strong></div>
         </Panel>
 
         <div className="sp-dependency-risk-stack">
@@ -548,6 +672,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
                   <td>{Math.round(member.committed / Math.max(1, member.capacity) * 100)}%</td>
                 </tr>
               ))}
+              {!team.length && <tr><td colSpan={6} className="sp-empty">No team members available. Add employees to allocate capacity.</td></tr>}
             </tbody>
             <tfoot><tr><td colSpan={3}>Total</td><td>{totalCapacity}h</td><td>{committedCapacity}h</td><td>{utilization}%</td></tr></tfoot>
           </table>
@@ -600,7 +725,12 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         <div className="sp-table-wrap">
           <table className="sp-table">
             <thead><tr><th>Type</th><th>Item ID</th><th>Title</th><th>Depends On</th><th>Impact</th><th>Action</th></tr></thead>
-            <tbody>{dependencies.map((item) => <tr key={item.id}><td>{item.type}</td><td className="sp-link">{item.itemId}</td><td>{item.title}</td><td>{item.dependsOn}</td><td><Badge tone={item.impact}>{item.impact}</Badge></td><td><button className="sp-remove-button" onClick={() => setDependencies((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={13} /></button></td></tr>)}</tbody>
+            <tbody>
+              {dependencies.map((item) => (
+                <tr key={item.id}><td>{item.type}</td><td className="sp-link">{item.itemId}</td><td>{item.title}</td><td>{item.dependsOn}</td><td><Badge tone={item.impact}>{item.impact}</Badge></td><td><button className="sp-remove-button" onClick={() => setDependencies((current) => current.filter((entry) => entry.id !== item.id))}><Trash2 size={13} /></button></td></tr>
+              ))}
+              {!dependencies.length && <tr><td colSpan={6} className="sp-empty">No dependencies added yet.</td></tr>}
+            </tbody>
           </table>
         </div>
       </Panel>
@@ -626,7 +756,12 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         <div className="sp-table-wrap">
           <table className="sp-table">
             <thead><tr><th>Type</th><th>Description</th><th>Impact</th><th>Probability</th><th>Owner</th><th>Action</th></tr></thead>
-            <tbody>{risks.map((risk) => <tr key={risk.id}><td>{risk.type}</td><td>{risk.description}</td><td><Badge tone={risk.impact}>{risk.impact}</Badge></td><td><Badge tone={risk.probability}>{risk.probability}</Badge></td><td>{risk.owner}</td><td><button className="sp-remove-button" onClick={() => setRisks((current) => current.filter((item) => item.id !== risk.id))}><Trash2 size={13} /></button></td></tr>)}</tbody>
+            <tbody>
+              {risks.map((risk) => (
+                <tr key={risk.id}><td>{risk.type}</td><td>{risk.description}</td><td><Badge tone={risk.impact}>{risk.impact}</Badge></td><td><Badge tone={risk.probability}>{risk.probability}</Badge></td><td>{risk.owner}</td><td><button className="sp-remove-button" onClick={() => setRisks((current) => current.filter((item) => item.id !== risk.id))}><Trash2 size={13} /></button></td></tr>
+              ))}
+              {!risks.length && <tr><td colSpan={6} className="sp-empty">No risks or assumptions added yet.</td></tr>}
+            </tbody>
           </table>
         </div>
       </Panel>
@@ -651,7 +786,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
             <div>Committed Capacity<strong>{committedCapacity}h</strong></div>
           </div>
           <div className="sp-form-grid">
-            <label>Sprint Code<input value={sprintId.toUpperCase()} readOnly /></label>
+            <label>Sprint Code<input value={sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()} readOnly /></label>
             <label>Sprint Name<input value={sprintName} readOnly /></label>
             <label>Milestone<input value={milestoneName} readOnly /></label>
             <label>Sprint Owner<input value={sprintOwner} readOnly /></label>
@@ -660,27 +795,19 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
           </div>
           <h3>Planning Checklist</h3>
           <div className="sp-checklist">
-            <div><CheckCircle2 className="sp-check-done" size={14} /> Sprint goal defined</div>
-            <div>{selectedItems.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Backlog items selected</div>
+            <div><CheckCircle2 className="sp-check-done" size={14} /> Sprint scope defined</div>
+            <div>{selectedItems.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Backlog items selected ({selectedItems.length})</div>
             <div>{totalCapacity > 0 ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Team capacity checked</div>
             <div>{dependencies.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Dependencies reviewed</div>
             <div>{risks.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Risks captured</div>
           </div>
-          <button className="sp-primary-button" onClick={() => notify("Review complete. Connect the sprint start API to commit this sprint.")}>
-            <Check size={13} /> Confirm Sprint Plan
+          <button className="sp-primary-button" onClick={confirmSprintPlan}>
+            <Check size={13} /> Confirm & Activate Sprint Plan
           </button>
         </div>
       </Panel>
     </div>
   );
-
-  const activities = [
-    ["16 May 2025, 11:20 AM", "Sprint created by Neha Patel"],
-    ["16 May 2025, 11:35 AM", `Backlog items selected (${selectedItems.length} items)`],
-    ["16 May 2025, 11:50 AM", "Team & capacity assigned"],
-    ["16 May 2025, 12:05 PM", "Planning in progress"],
-    ["16 May 2025, 12:15 PM", "Dependencies and risks reviewed"],
-  ];
 
   return (
     <main className="sprint-planning">
@@ -690,7 +817,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
           <ChevronRight size={13} />
           <Link href="/sprints">Sprint Registry</Link>
           <ChevronRight size={13} />
-          <strong>Sprint Planning ({sprintId.toUpperCase()})</strong>
+          <strong>Sprint Planning ({sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()})</strong>
         </nav>
         <div className="sp-toolbar-actions">
           <button onClick={saveDraft}><Save size={12} /> Save as Draft</button>
@@ -702,23 +829,23 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
       <div className="sp-title">
         <FileText size={24} />
         <div>
-          <h1>Sprint Planning ({sprintId.toUpperCase()}) <Badge tone="planning">Planning</Badge></h1>
+          <h1>Sprint Planning ({sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}) <Badge tone="planning">Planning</Badge></h1>
           <p>Plan and commit the work for the sprint including scope, team, capacity and schedule.</p>
         </div>
       </div>
 
       <section className="sp-overview">
-        <div className="sp-overview-cell"><span>Sprint</span><strong><CalendarDays size={13} /> {sprintId.toUpperCase()}</strong></div>
+        <div className="sp-overview-cell"><span>Sprint</span><strong><CalendarDays size={13} /> {sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}</strong></div>
         <div className="sp-overview-cell"><span>Milestone</span><strong>{milestoneName}</strong></div>
         <div className="sp-overview-cell"><span>Sprint Name</span><strong>{sprintName}</strong></div>
         <div className="sp-overview-cell"><span>Sprint Type</span><strong>Development</strong></div>
         <div className="sp-overview-cell"><span>Planned Dates</span><strong>{formatDate(startDate)} – {formatDate(endDate)}</strong><small>{duration} Days</small></div>
         <div className="sp-overview-cell"><span>Status</span><strong><Badge tone="planning">Planning</Badge></strong></div>
-        <div className="sp-overview-cell"><span>Sprint Owner</span><strong><span className="sp-avatar">NP</span> Neha Patel</strong><small>Tech Lead</small></div>
+        <div className="sp-overview-cell"><span>Sprint Owner</span><strong>{sprintOwner}</strong></div>
         <div className="sp-overview-cell"><span>Total Story Points</span><strong>{totalPoints} SP</strong></div>
         <div className="sp-overview-cell"><span>Total Tasks</span><strong>{selectedItems.length}</strong></div>
         <div className="sp-overview-cell"><span>Capacity (Team)</span><strong>{totalCapacity}h</strong></div>
-        <div className="sp-overview-cell"><span>Committed</span><strong>{committedCapacity} SP <em>{utilization}%</em></strong></div>
+        <div className="sp-overview-cell"><span>Committed</span><strong>{committedCapacity}h <em>{utilization}%</em></strong></div>
       </section>
 
       <div className="sp-dashboard">
@@ -742,44 +869,47 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         <aside className="sp-right-column">
           <Panel title="Sprint Summary" action={<button className="sp-icon-button" onClick={() => setActiveTab("scope")} aria-label="Edit sprint"><Pencil size={13} /></button>}>
             <div className="sp-summary-list">
-              <div><span>Sprint Code</span><strong>{sprintId.toUpperCase()}</strong></div>
+              <div><span>Sprint Code</span><strong>{sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}</strong></div>
               <div><span>Sprint Name</span><strong>{sprintName}</strong></div>
-              <div><span>Milestone</span><strong>MLS-002 — Module Development</strong></div>
-              <div><span>Sprint Owner</span><strong><span className="sp-avatar">NP</span> Neha Patel</strong></div>
-              <div><span>Type</span><strong>Development</strong></div>
-              <div><span>Priority</span><strong><i className="sp-priority-dot" /> High</strong></div>
+              <div><span>Milestone</span><strong>{milestoneName}</strong></div>
+              <div><span>Sprint Owner</span><strong>{sprintOwner}</strong></div>
+              <div><span>Priority</span><strong><i className="sp-priority-dot" /> {sprintPriority}</strong></div>
               <div><span>Planned Dates</span><strong>{formatDate(startDate)} – {formatDate(endDate)}</strong></div>
               <div><span>Working Days</span><strong>{workingDayCount} Days</strong></div>
               <div><span>Total Story Points</span><strong>{totalPoints} SP</strong></div>
-              <div><span>Total Tasks</span><strong>{selectedItems.length}</strong></div>
-              <div><span>Status</span><strong><Badge tone="planning">Planning</Badge></strong></div>
+              <div><span>Total Backlog Items</span><strong>{selectedItems.length}</strong></div>
+              <div><span>Status</span><strong><Badge tone="planning">{sprint?.status || "Planning"}</Badge></strong></div>
             </div>
           </Panel>
 
           <Panel title="Story Points Distribution">
             <div className="sp-donut-layout">
-              <div className="sp-donut" style={{ background: `conic-gradient(#0754f9 0 ${totalPoints ? requirementPoints / totalPoints * 100 : 0}%, #078b53 ${totalPoints ? requirementPoints / totalPoints * 100 : 0}% 100%)` }}>
+              <div className="sp-donut" style={{ background: `conic-gradient(#0754f9 0 ${totalPoints ? (requirementPoints / totalPoints) * 100 : 0}%, #078b53 ${totalPoints ? (requirementPoints / totalPoints) * 100 : 0}% 100%)` }}>
                 <div><strong>{totalPoints}</strong><span>Total SP</span></div>
               </div>
               <div className="sp-donut-legend">
-                <div><i className="blue" /><span>Requirement</span><strong>{requirementPoints} SP ({totalPoints ? Math.round(requirementPoints / totalPoints * 100) : 0}%)</strong></div>
-                <div><i className="green" /><span>Task</span><strong>{taskPoints} SP ({totalPoints ? Math.round(taskPoints / totalPoints * 100) : 0}%)</strong></div>
+                <div><i className="blue" /><span>Requirement</span><strong>{requirementPoints} SP ({totalPoints ? Math.round((requirementPoints / totalPoints) * 100) : 0}%)</strong></div>
+                <div><i className="green" /><span>Task</span><strong>{taskPoints} SP ({totalPoints ? Math.round((taskPoints / totalPoints) * 100) : 0}%)</strong></div>
               </div>
             </div>
             <div className="sp-scope-health"><strong>Scope Health</strong><span className="sp-progress"><span className="sp-fill-green" style={{ width: `${Math.min(100, utilization)}%` }} /></span><strong>{utilization}%</strong><em>{utilization <= 85 ? "Good" : "High Load"}</em></div>
           </Panel>
 
           <Panel title="Sprint Planning Activity" action={<button className="sp-text-button" onClick={() => setShowAllActivity((value) => !value)}>{showAllActivity ? "Show Less" : "View All"}</button>}>
-            <div className="sp-activity-list">
-              {(showAllActivity ? activities : activities.slice(0, 4)).map(([date, description]) => (
-                <div key={date + description}><strong>{date}</strong><span>{description}</span></div>
-              ))}
-            </div>
+            {activities.length === 0 ? (
+              <div style={{ padding: "16px", color: "#6b7280", textAlign: "center", fontSize: "12px" }}>No recent audit activity.</div>
+            ) : (
+              <div className="sp-activity-list">
+                {(showAllActivity ? activities : activities.slice(0, 4)).map(([date, description], index) => (
+                  <div key={index}><strong>{date}</strong><span>{description}</span></div>
+                ))}
+              </div>
+            )}
           </Panel>
 
           <Panel title="Planning Checklist">
             <div className="sp-checklist">
-              <div><CheckCircle2 className="sp-check-done" size={14} /> Sprint goal defined</div>
+              <div><CheckCircle2 className="sp-check-done" size={14} /> Sprint scope defined</div>
               <div>{selectedItems.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Backlog items selected</div>
               <div>{totalCapacity > 0 ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Capacity checked</div>
               <div>{dependencies.length ? <CheckCircle2 className="sp-check-done" size={14} /> : <Circle size={14} />} Dependencies identified</div>

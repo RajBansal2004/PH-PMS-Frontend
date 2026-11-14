@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
+import { getResources, employees as getEmployeesList } from "@/lib/api";
 import {
   Users,
   Search,
@@ -14,6 +15,7 @@ import {
   Layers,
   ChevronRight,
   TrendingUp,
+  RefreshCw,
 } from "lucide-react";
 
 type ResourceRecord = {
@@ -30,114 +32,89 @@ type ResourceRecord = {
   effectiveCapacityHours: number; // 7.2h/day standard
   benchStatus: "ALLOCATED" | "PARTIAL" | "BENCH";
   statusTone: "green" | "amber" | "red";
+  isLive?: boolean;
 };
 
-const initialResources: ResourceRecord[] = [
-  {
-    id: "EMP-001",
-    name: "Rahul Verma",
-    code: "PHT-EMP-0101",
-    email: "rahul.verma@pehalhealthcare.com",
-    department: "Application Development",
-    designation: "Project Manager",
-    primarySkill: "Agile Project Delivery",
-    secondarySkills: ["Healthcare IT", "Jira", "Risk Management"],
-    allocationPercent: 85,
-    activeProjects: [
-      { name: "AI-CMS Apollo", percent: 50 },
-      { name: "Telehealth Portal", percent: 35 },
-    ],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "ALLOCATED",
-    statusTone: "amber",
-  },
-  {
-    id: "EMP-002",
-    name: "Amit Kumar",
-    code: "PHT-EMP-0102",
-    email: "amit.kumar@pehalhealthcare.com",
-    department: "Application Development",
-    designation: "Technical Lead",
-    primarySkill: "Node.js & Microservices",
-    secondarySkills: ["PostgreSQL", "Redis", "AWS Lambda"],
-    allocationPercent: 120, // OVERALLOCATED > 100%
-    activeProjects: [
-      { name: "AI-CMS Apollo", percent: 70 },
-      { name: "Telehealth Portal", percent: 50 },
-    ],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "ALLOCATED",
-    statusTone: "red",
-  },
-  {
-    id: "EMP-003",
-    name: "Neha Patel",
-    code: "PHT-EMP-0103",
-    email: "neha.patel@pehalhealthcare.com",
-    department: "Product",
-    designation: "Technical Lead",
-    primarySkill: "React & Next.js",
-    secondarySkills: ["TypeScript", "TailwindCSS", "State Management"],
-    allocationPercent: 75,
-    activeProjects: [{ name: "AI-CMS Apollo", percent: 75 }],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "ALLOCATED",
-    statusTone: "green",
-  },
-  {
-    id: "EMP-004",
-    name: "Pooja Singh",
-    code: "PHT-EMP-0104",
-    email: "pooja.singh@pehalhealthcare.com",
-    department: "Research & Development",
-    designation: "Senior Executive",
-    primarySkill: "AI & Machine Learning",
-    secondarySkills: ["Python", "TensorFlow", "NLP Clinical Models"],
-    allocationPercent: 50,
-    activeProjects: [{ name: "AI Diagnostics POC", percent: 50 }],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "PARTIAL",
-    statusTone: "green",
-  },
-  {
-    id: "EMP-005",
-    name: "Vikram Singh",
-    code: "PHT-EMP-0105",
-    email: "vikram.singh@pehalhealthcare.com",
-    department: "Services",
-    designation: "Senior Executive",
-    primarySkill: "QA Automation",
-    secondarySkills: ["Selenium", "Playwright", "Cypress", "API Testing"],
-    allocationPercent: 80,
-    activeProjects: [
-      { name: "AI-CMS Apollo", percent: 40 },
-      { name: "Telehealth Portal", percent: 40 },
-    ],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "ALLOCATED",
-    statusTone: "green",
-  },
-  {
-    id: "EMP-006",
-    name: "Karthik Reddy",
-    code: "PHT-EMP-0106",
-    email: "karthik.reddy@pehalhealthcare.com",
-    department: "Application Development",
-    designation: "Executive",
-    primarySkill: "Java / Spring Boot",
-    secondarySkills: ["J2EE", "Hibernate", "REST APIs"],
-    allocationPercent: 0, // BENCH
-    activeProjects: [],
-    effectiveCapacityHours: 7.2,
-    benchStatus: "BENCH",
-    statusTone: "green",
-  },
-];
-
 export default function ResourcesPage() {
-  const [resources] = useState<ResourceRecord[]>(initialResources);
+  const [resources, setResources] = useState<ResourceRecord[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("ALL");
+  const [loading, setLoading] = useState(true);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+
+  const fetchResourcesData = async () => {
+    setLoading(true);
+    try {
+      const [resData, empData] = await Promise.allSettled([
+        getResources(),
+        getEmployeesList().catch(() => []),
+      ]);
+
+      const resItems = resData.status === "fulfilled" && resData.value?.items ? resData.value.items : [];
+      const empItems = empData.status === "fulfilled" && Array.isArray(empData.value) ? empData.value : [];
+
+      if (resItems.length > 0) {
+        const mapped: ResourceRecord[] = resItems.map((it: any) => {
+          const alloc = Number(it.currentAllocationPercent ?? it.allocationPercent ?? 0);
+          const tone: "green" | "amber" | "red" = alloc > 100 ? "red" : alloc >= 80 ? "amber" : "green";
+          const bench: "ALLOCATED" | "PARTIAL" | "BENCH" = alloc === 0 ? "BENCH" : alloc < 70 ? "PARTIAL" : "ALLOCATED";
+
+          return {
+            id: it._id || it.id,
+            name: it.employeeId?.name || it.name || "Resource Specialist",
+            code: it.employeeId?.employeeCode || it.code || `PHT-EMP-${(it._id || "0000").slice(-4).toUpperCase()}`,
+            email: it.employeeId?.email || it.email || "resource@pehalhealthcare.com",
+            department: it.departmentId?.name || it.department || "Application Development",
+            designation: it.designationId?.name || it.designation || "Engineer",
+            primarySkill: it.primarySkill || "Full Stack Architecture",
+            secondarySkills: Array.isArray(it.secondarySkills) && it.secondarySkills.length ? it.secondarySkills : ["TypeScript", "Cloud APIs"],
+            allocationPercent: alloc,
+            activeProjects: Array.isArray(it.activeProjects) && it.activeProjects.length ? it.activeProjects : [{ name: "Core Healthcare PMS", percent: alloc }],
+            effectiveCapacityHours: 7.2,
+            benchStatus: bench,
+            statusTone: tone,
+            isLive: true,
+          };
+        });
+        setResources(mapped);
+        setIsLiveConnected(true);
+      } else if (empItems.length > 0) {
+        const mapped: ResourceRecord[] = empItems.map((emp: any, idx: number) => {
+          const alloc = Number(emp.currentAllocationPercent ?? emp.allocationPercent ?? 0);
+          return {
+            id: emp._id || `EMP-${idx}`,
+            name: emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || "Team Member",
+            code: emp.employeeCode || `PHT-EMP-0${100 + idx}`,
+            email: emp.email || "member@pehalhealthcare.com",
+            department: emp.departmentId?.name || emp.department || "Engineering",
+            designation: emp.designationId?.name || emp.designation || "Developer",
+            primarySkill: emp.primarySkill || "Software Engineering",
+            secondarySkills: Array.isArray(emp.secondarySkills) ? emp.secondarySkills : Array.isArray(emp.skills) ? emp.skills : [],
+            allocationPercent: alloc,
+            activeProjects: Array.isArray(emp.activeProjects) ? emp.activeProjects : [],
+            effectiveCapacityHours: 7.2,
+            benchStatus: alloc === 0 ? "BENCH" : alloc < 70 ? "PARTIAL" : "ALLOCATED",
+            statusTone: alloc > 100 ? "red" : alloc >= 80 ? "amber" : "green",
+            isLive: true,
+          };
+        });
+        setResources(mapped);
+        setIsLiveConnected(true);
+      } else {
+        setResources([]);
+        setIsLiveConnected(true);
+      }
+    } catch {
+      setResources([]);
+      setIsLiveConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchResourcesData();
+  }, []);
 
   const filtered = resources.filter((r) => {
     const matchesSearch =
@@ -163,7 +140,21 @@ export default function ResourcesPage() {
             <h1>Resource Allocation & Capacity Master</h1>
             <p>Manage multi-project allocation, capacity planning (6 days, 7.2h net effective), skills matrix, and bench forecasting.</p>
           </div>
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "0.8rem", color: isLiveConnected ? "#059669" : "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: isLiveConnected ? "#059669" : "#94a3b8" }} />
+              {isLiveConnected ? "Live API Connected" : "Local / Seed View"}
+            </span>
+            <button
+              type="button"
+              className="btn outline"
+              onClick={fetchResourcesData}
+              disabled={loading}
+              title="Sync resources from backend"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} style={{ marginRight: "4px" }} />
+              {loading ? "Syncing..." : "Sync API"}
+            </button>
             <Link href="/users/new" className="btn primary">
               + Add Resource
             </Link>
@@ -260,8 +251,22 @@ export default function ResourcesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((res) => (
-                  <tr key={res.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
+                {loading && resources.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
+                      <RefreshCw size={28} className="animate-spin" style={{ margin: "0 auto 8px" }} />
+                      <div>Loading live resource roster from API...</div>
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
+                      <div>No engineering resources found from API.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((res) => (
+                    <tr key={res.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
                     <td style={{ padding: "12px" }}>
                       <div style={{ fontWeight: "bold", color: "#0f172a" }}>{res.name}</div>
                       <small style={{ color: "#64748b" }}>{res.code} · {res.email}</small>
@@ -316,7 +321,7 @@ export default function ResourcesPage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>

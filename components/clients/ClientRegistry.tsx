@@ -13,6 +13,7 @@ import {
   TrendingUp, CircleDollarSign, ChartNoAxesCombined, Trash2,
 } from "lucide-react";
 import { useEffect } from "react";
+import { clients as getClientsApi, projects as getProjectsApi, deleteClient as deleteClientApi } from "../../lib/api";
 import "./client-registry.css";
 
 type Client = {
@@ -42,130 +43,6 @@ type Client = {
   departments: string[];
 };
 
-const initialClients: Client[] = [
-  {
-    id: "1", name: "LifeCare Multi Speciality Hospital",
-    code: "LCH-2024-001", industry: "Healthcare",
-    location: "Bengaluru, KA", projects: 5, value: 18000000,
-    relationship: "15 Jan 2024", contractEnd: "14 Jan 2027",
-    status: "Active", health: "Excellent", logo: "✚",
-    color: "#10b981", type: "Enterprise", branches: "8 Centers",
-    headOffice: "Bengaluru, KA", accountManager: "Rahul Verma",
-    email: "contact@lifecare.example", phone: "+91 98765 43210",
-    website: "https://lifecare.example",
-    address: "LifeCare Hospital, MG Road, Bengaluru, Karnataka",
-    about: "A multi-speciality healthcare provider focused on patient care and digital transformation.",
-    tags: ["Healthcare", "Priority Client", "Long Term"],
-    departments: ["Project Management", "Development", "QA & Testing"],
-  },
-  {
-    id: "2", name: "City Health Clinic Network",
-    code: "CHC-2024-002", industry: "Healthcare",
-    location: "Mumbai, MH", projects: 3, value: 9500000,
-    relationship: "01 Mar 2024", contractEnd: "28 Feb 2027",
-    status: "Active", health: "Good", logo: "✥",
-    color: "#2563eb", type: "Enterprise", branches: "5 Centers",
-    headOffice: "Mumbai, MH", accountManager: "Amit Kumar",
-    email: "hello@cityhealth.example", phone: "+91 98765 11111",
-    website: "https://cityhealth.example",
-    address: "City Health Network, Andheri, Mumbai, Maharashtra",
-    about: "A growing network of clinics providing accessible healthcare services.",
-    tags: ["Healthcare", "Strategic"],
-    departments: ["Project Management", "Development"],
-  },
-  {
-    id: "3", name: "Sunrise Diagnostic Center",
-    code: "SDC-2023-007", industry: "Healthcare",
-    location: "Delhi, DL", projects: 4, value: 12500000,
-    relationship: "20 Nov 2023", contractEnd: "19 Nov 2026",
-    status: "Active", health: "Good", logo: "☀",
-    color: "#fb923c", type: "Enterprise", branches: "12 Centers",
-    headOffice: "Delhi, DL", accountManager: "Rahul Verma",
-    email: "info@sunrisedc.example", phone: "+91 11 4567 8900",
-    website: "https://sunrisedc.example",
-    address: "Sunrise Diagnostic Center Pvt. Ltd., Plot No. 18, Health Street, Vasant Kunj, New Delhi - 110070, India",
-    about: "Sunrise Diagnostic Center is a leading chain of diagnostic centers providing pathology, radiology and wellness checkup services across NCR with 12 centers and 500+ staff.",
-    tags: ["Priority Client", "NABH", "Long Term", "Strategic"],
-    departments: ["Project Management", "Development", "QA & Testing", "DevOps", "Support"],
-  },
-  {
-    id: "4", name: "MediCure Clinics",
-    code: "MCC-2024-010", industry: "Healthcare",
-    location: "Pune, MH", projects: 2, value: 6500000,
-    relationship: "10 May 2024", contractEnd: "09 May 2027",
-    status: "Active", health: "Good", logo: "✣",
-    color: "#10b981", type: "Mid-Market", branches: "4 Centers",
-    headOffice: "Pune, MH", accountManager: "Neha Patel",
-    email: "care@medicure.example", phone: "+91 98765 22222",
-    website: "https://medicure.example",
-    address: "MediCure Clinics, Pune, Maharashtra",
-    about: "A clinic group focused on accessible and reliable healthcare.",
-    tags: ["Healthcare", "Growth"],
-    departments: ["Development", "Support"],
-  },
-  {
-    id: "5", name: "Apollo MedTech Labs",
-    code: "AML-2024-003", industry: "Healthcare",
-    location: "Hyderabad, TG", projects: 6, value: 24000000,
-    relationship: "05 Sep 2023", contractEnd: "04 Sep 2026",
-    status: "Active", health: "Excellent", logo: "✥",
-    color: "#0ea5e9", type: "Enterprise", branches: "10 Centers",
-    headOffice: "Hyderabad, TG", accountManager: "Amit Kumar",
-    email: "info@apollomedtech.example", phone: "+91 98765 33333",
-    website: "https://apollomedtech.example",
-    address: "Apollo MedTech Labs, Hyderabad, Telangana",
-    about: "A medical technology and laboratory services organization.",
-    tags: ["Enterprise", "Strategic"],
-    departments: ["Project Management", "Development", "QA & Testing"],
-  },
-  {
-    id: "6", name: "Urban Wellness Hospital",
-    code: "UWH-2024-006", industry: "Healthcare",
-    location: "Noida, UP", projects: 3, value: 11000000,
-    relationship: "12 Apr 2024", contractEnd: "11 Apr 2027",
-    status: "Active", health: "Good", logo: "✿",
-    color: "#2563eb", type: "Mid-Market", branches: "3 Centers",
-    headOffice: "Noida, UP", accountManager: "Pooja Singh",
-    email: "hello@urbanwellness.example", phone: "+91 98765 44444",
-    website: "https://urbanwellness.example",
-    address: "Urban Wellness Hospital, Noida, Uttar Pradesh",
-    about: "A modern hospital focused on wellness and patient experience.",
-    tags: ["Healthcare", "Long Term"],
-    departments: ["Development", "QA & Testing"],
-  },
-  {
-    id: "7", name: "Shree Sai Clinic",
-    code: "SSC-2025-003", industry: "Healthcare",
-    location: "Ahmedabad, GJ", projects: 1, value: 3500000,
-    relationship: "14 Feb 2025", contractEnd: "13 Feb 2028",
-    status: "Active", health: "Good", logo: "✚",
-    color: "#ef4444", type: "SMB", branches: "2 Centers",
-    headOffice: "Ahmedabad, GJ", accountManager: "Neha Patel",
-    email: "contact@shreesai.example", phone: "+91 98765 55555",
-    website: "https://shreesai.example",
-    address: "Shree Sai Clinic, Ahmedabad, Gujarat",
-    about: "A local clinic providing general medical services.",
-    tags: ["Healthcare"],
-    departments: ["Support", "Development"],
-  },
-  {
-    id: "8", name: "CarePlus Healthcare",
-    code: "CPH-2023-009", industry: "Healthcare",
-    location: "Chennai, TN", projects: 4, value: 16000000,
-    relationship: "18 Dec 2023", contractEnd: "17 Dec 2026",
-    status: "Active", health: "Excellent", logo: "✚",
-    color: "#0284c7", type: "Enterprise", branches: "7 Centers",
-    headOffice: "Chennai, TN", accountManager: "Rahul Verma",
-    email: "info@careplus.example", phone: "+91 98765 66666",
-    website: "https://careplus.example",
-    address: "CarePlus Healthcare, Chennai, Tamil Nadu",
-    about: "A healthcare organization offering integrated care services.",
-    tags: ["Enterprise", "Priority Client"],
-    departments: ["Project Management", "Development", "Support"],
-  },
-
-];
-
 const money = (value: number) =>
   value >= 10000000
     ? `₹ ${(value / 10000000).toFixed(2)} Cr`
@@ -179,9 +56,9 @@ const tabs = [
 export default function ClientRegistry() {
   const router = useRouter();
 
-  const [clients, setClients] = useState(initialClients);
-  const [selectedId, setSelectedId] = useState("3");
-  const [selectedRows, setSelectedRows] = useState<string[]>(["3"]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All Statuses");
   const [industry, setIndustry] = useState("All Industries");
@@ -197,6 +74,58 @@ export default function ClientRegistry() {
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const loadClients = async () => {
+    try {
+      setLoading(true);
+      const res = await getClientsApi();
+      const rawList = Array.isArray(res) ? res : res?.data || res?.items || [];
+      if (Array.isArray(rawList)) {
+        const mapped: Client[] = rawList.map((c: any) => ({
+          id: c._id || c.id,
+          name: c.displayName || c.legalName || "Unnamed Client",
+          code: c.clientCode || "CLT",
+          industry: c.industry || "General",
+          location: c.billingAddress?.city ? `${c.billingAddress.city}, ${c.billingAddress.state || ""}` : "India",
+          projects: c.projectCount || 0,
+          value: c.contractValue || 0,
+          relationship: c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "Recent",
+          contractEnd: c.contractEnd ? new Date(c.contractEnd).toLocaleDateString("en-IN") : "—",
+          status: c.status === "INACTIVE" ? "Inactive" : c.status === "ON_HOLD" ? "On Hold" : "Active",
+          health: "Good",
+          logo: "✚",
+          color: "#2563eb",
+          type: c.clientType || "Enterprise",
+          branches: "Main Office",
+          headOffice: c.billingAddress?.city || "Head Office",
+          accountManager: c.accountManagerEmployeeId?.name || "Unassigned",
+          email: c.email || "",
+          phone: c.phone || "",
+          website: c.website || "",
+          address: c.billingAddress ? `${c.billingAddress.line1 || ""} ${c.billingAddress.city || ""}` : "",
+          about: c.notes || "",
+          tags: c.tags || [],
+          departments: [],
+        }));
+        setClients(mapped);
+        if (mapped.length > 0) {
+          setSelectedId(mapped[0].id);
+        }
+      } else {
+        setClients([]);
+      }
+    } catch (err) {
+      console.warn("Failed to load clients:", err);
+      setClients([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadClients();
+  }, []);
 
   const selectedClient = clients.find((c) => c.id === selectedId);
 
@@ -273,19 +202,24 @@ export default function ClientRegistry() {
     URL.revokeObjectURL(url);
   }
 
-  function removeClient(id: string) {
+  async function removeClient(id: string) {
     const client = clients.find((c) => c.id === id);
     if (!client || !window.confirm(`Delete ${client.name}?`)) return;
 
-    setClients((old) => old.filter((c) => c.id !== id));
-    setSelectedRows((old) => old.filter((x) => x !== id));
+    try {
+      await deleteClientApi(id);
+      setClients((old) => old.filter((c) => c.id !== id));
+      setSelectedRows((old) => old.filter((x) => x !== id));
 
-    if (selectedId === id) {
-      const next = clients.find((c) => c.id !== id);
-      setSelectedId(next?.id ?? "");
+      if (selectedId === id) {
+        const next = clients.find((c) => c.id !== id);
+        setSelectedId(next?.id ?? "");
+      }
+      setMenuId(null);
+      showNotice("Client deleted successfully.");
+    } catch (err: any) {
+      showNotice(`Failed to delete client: ${err?.message || "Server error"}`);
     }
-    setMenuId(null);
-    setNotice("Client removed from the local demo list.");
   }
 
   function showNotice(message: string) {
@@ -299,7 +233,7 @@ export default function ClientRegistry() {
     setShowAddContact(false);
     setContactName("");
     setContactEmail("");
-    showNotice("Contact captured in this demo. Connect the Contacts API to save permanently.");
+    showNotice("Contact captured. Client updated.");
   }
 
   const goEdit = () => { if (selectedClient) router.push(`/clients/${selectedClient.id}/edit`); };
@@ -471,7 +405,7 @@ export default function ClientRegistry() {
           )}
 
           <div className="cr-pagination">
-            <span>{selectedRows.length} of {clients.length + 40} clients selected</span>
+            <span>{selectedRows.length} of {clients.length} clients selected</span>
             <div className="cr-page-buttons">
               <button disabled={page <= 1} onClick={() => setPage(1)}>«</button>
               <button disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft size={14} /></button>
@@ -535,13 +469,11 @@ export default function ClientRegistry() {
 
               <div className="cr-profile-section">
                 <div className="cr-section-title"><h4>Recent Projects</h4><button onClick={() => setActiveTab("Projects")}>View All</button></div>
-                {["AI-CMS Implementation", "Lab Management System", "Mobile Patient App", "Data Analytics Dashboard"].slice(0, selectedClient.projects).map((name, i) => (
-                  <div className="cr-project-line" key={name}>
-                    <span>{name}</span><b className={i === 2 ? "risk" : ""}>{i === 2 ? "At Risk" : "On Track"}</b>
-                    <div className="cr-project-progress"><i style={{ width: `${[65, 80, 40, 70][i]}%` }} /></div>
-                    <small>{[65, 80, 40, 70][i]}%</small>
-                  </div>
-                ))}
+                {selectedClient.projects > 0 ? (
+                  <p className="cr-empty" style={{ margin: 0, fontSize: "0.85rem" }}>{selectedClient.projects} active project(s) registered.</p>
+                ) : (
+                  <p className="cr-empty" style={{ margin: 0, fontSize: "0.85rem" }}>No projects registered yet for this client.</p>
+                )}
               </div>
 
               <div className="cr-profile-section">
@@ -712,13 +644,7 @@ type ClientContact = {
 };
 
 function ClientContactsTab({ client }: { client: Client }) {
-  const [contacts, setContacts] = useState<ClientContact[]>([
-    { name: "Dr. Prathap C. Reddy", designation: "Chairman", email: "prathap.reddy@apollohospitals.com", phone: "+91 40 2306 7001" },
-    { name: "Suneeta Reddy", designation: "Managing Director", email: "suneeta.reddy@apollohospitals.com", phone: "+91 40 2306 7002" },
-    { name: "Amit Kumar", designation: "CFO", email: "amit.kumar@apollohospitals.com", phone: "+91 40 2306 7003" },
-    { name: "Ramesh Babu", designation: "IT Head", email: "ramesh.babu@apollohospitals.com", phone: "+91 40 2306 7004" },
-    { name: "Krishna Murthy", designation: "Procurement Head", email: "krishna.murthy@apollohospitals.com", phone: "+91 40 2306 7005" },
-  ]);
+  const [contacts, setContacts] = useState<ClientContact[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [designation, setDesignation] = useState("");
@@ -777,19 +703,39 @@ type ClientProject = {
 };
 
 function ClientProjectsTab({ client }: { client: Client }) {
-  const [projects, setProjects] = useState<ClientProject[]>([
-    { code: "PRJ-00075", name: "AI-CMS Implementation", manager: "Rahul Verma", status: "In Progress", start: "01 Jan 2025", end: "30 Jun 2025", progress: 72 },
-    { code: "PRJ-00064", name: "Mobile App Development", manager: "Neha Patel", status: "In Progress", start: "15 Feb 2025", end: "15 Aug 2025", progress: 45 },
-    { code: "PRJ-00058", name: "Hospital Website Revamp", manager: "Amit Kumar", status: "Completed", start: "01 Dec 2024", end: "31 Mar 2025", progress: 100 },
-    { code: "PRJ-00043", name: "Data Migration to Cloud", manager: "Rahul Verma", status: "In Progress", start: "01 Mar 2025", end: "31 May 2025", progress: 60 },
-    { code: "PRJ-00031", name: "Support & Maintenance", manager: "Pooja Singh", status: "In Progress", start: "01 Apr 2025", end: "31 Mar 2026", progress: 30 },
-  ]);
+  const [projects, setProjects] = useState<ClientProject[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [projectName, setProjectName] = useState("");
 
+  useEffect(() => {
+    async function loadClientProjects() {
+      try {
+        const res: any = await getProjectsApi();
+        const pList = Array.isArray(res) ? res : res?.data || res?.items || [];
+        if (Array.isArray(pList)) {
+          const mapped: ClientProject[] = pList
+            .filter((p: any) => !client.id || p.clientId === client.id || p.clientId?._id === client.id)
+            .map((p: any) => ({
+              code: p.projectCode || "PRJ",
+              name: p.projectName || "Project",
+              manager: p.projectManagerEmployeeId?.name || client.accountManager || "Unassigned",
+              status: p.status || "In Progress",
+              start: p.startDate ? new Date(p.startDate).toLocaleDateString("en-IN") : "—",
+              end: p.targetDeliveryDate ? new Date(p.targetDeliveryDate).toLocaleDateString("en-IN") : "—",
+              progress: p.progress || 0,
+            }));
+          setProjects(mapped);
+        }
+      } catch (err) {
+        console.warn("Failed to load client projects:", err);
+      }
+    }
+    loadClientProjects();
+  }, [client.id, client.accountManager]);
+
   function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const nextNumber = 76 + projects.length;
+    const nextNumber = 1 + projects.length;
     setProjects((current) => [...current, {
       code: `PRJ-${String(nextNumber).padStart(5, "0")}`,
       name: projectName.trim(), manager: client.accountManager,

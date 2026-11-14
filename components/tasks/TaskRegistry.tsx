@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createTask as createTaskApi, employees as getEmployeesApi, tasks as getTasksApi } from "../../lib/api";
 import {
   Search, Plus, Bell, CircleHelp, ChevronDown, ChevronLeft,
   ChevronRight, Download, Upload, Filter, Settings, MoreVertical,
@@ -38,149 +39,6 @@ type Task = {
   activity: string;
 };
 
-const initialTasks: Task[] = [
-  {
-    id: "TSK-001", title: "Design login screen UI", type: "Design",
-    status: "In Progress", priority: "High", assignee: "Priya Verma",
-    initials: "PV", parent: "US-145", estimated: 8, spent: 5,
-    dueDate: "28 May 2025", description: "Design the login screen for both admin and doctor users. Ensure it is responsive and matches the design system.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["UI", "Login", "High Priority"],
-    attachments: [
-      { name: "login_mockup.fig", size: "2.4 MB", type: "fig" },
-      { name: "design_guidelines.pdf", size: "1.8 MB", type: "pdf" },
-    ],
-    activity: "Priya Verma updated status to In Progress",
-  },
-  {
-    id: "TSK-002", title: "API integration for login", type: "Development",
-    status: "In Progress", priority: "High", assignee: "Amit Kumar",
-    initials: "AK", parent: "US-145", estimated: 10, spent: 6,
-    dueDate: "28 May 2025", description: "Integrate the login API and handle authentication responses.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["API", "Authentication"],
-    attachments: [], activity: "Amit Kumar updated task progress",
-  },
-  {
-    id: "TSK-003", title: "Validate user login", type: "QA",
-    status: "In Review", priority: "Medium", assignee: "Sneha Patel",
-    initials: "SP", parent: "US-145", estimated: 4, spent: 3,
-    dueDate: "29 May 2025", description: "Validate login flows and test invalid credentials.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["QA", "Login"],
-    attachments: [], activity: "Sneha Patel submitted the task for review",
-  },
-  {
-    id: "TSK-004", title: "Design dashboard layout", type: "Design",
-    status: "To Do", priority: "High", assignee: "Priya Verma",
-    initials: "PV", parent: "US-146", estimated: 12, spent: 0,
-    dueDate: "30 May 2025", description: "Create the responsive dashboard layout.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Dashboard", "UI"],
-    attachments: [], activity: "Task created by Mayank Swaroop",
-  },
-  {
-    id: "TSK-005", title: "Develop dashboard widgets", type: "Development",
-    status: "In Progress", priority: "High", assignee: "Vikas Singh",
-    initials: "VS", parent: "US-146", estimated: 16, spent: 9,
-    dueDate: "01 Jun 2025", description: "Build reusable dashboard widgets.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Dashboard", "Frontend"],
-    attachments: [], activity: "Vikas Singh updated task progress",
-  },
-  {
-    id: "TSK-006", title: "Connect widgets with API", type: "Development",
-    status: "To Do", priority: "Medium", assignee: "Rahul Sharma",
-    initials: "RS", parent: "US-146", estimated: 8, spent: 0,
-    dueDate: "01 Jun 2025", description: "Connect dashboard widgets to backend APIs.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["API"],
-    attachments: [], activity: "Task assigned to Rahul Sharma",
-  },
-  {
-    id: "TSK-007", title: "Write unit tests", type: "QA",
-    status: "Testing", priority: "Medium", assignee: "Neha Gupta",
-    initials: "NG", parent: "US-146", estimated: 5, spent: 2,
-    dueDate: "02 Jun 2025", description: "Write unit tests for the dashboard module.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Testing"],
-    attachments: [], activity: "Neha Gupta started testing",
-  },
-  {
-    id: "TSK-008", title: "Fix dashboard alignment", type: "Design",
-    status: "In Review", priority: "Low", assignee: "Priya Verma",
-    initials: "PV", parent: "US-146", estimated: 3, spent: 2,
-    dueDate: "02 Jun 2025", description: "Fix responsive alignment issues.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Responsive"],
-    attachments: [], activity: "Task moved to review",
-  },
-  {
-    id: "TSK-009", title: "Optimize API response", type: "Development",
-    status: "To Do", priority: "Medium", assignee: "Vikas Singh",
-    initials: "VS", parent: "US-147", estimated: 6, spent: 0,
-    dueDate: "03 Jun 2025", description: "Improve API response performance.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Performance"],
-    attachments: [], activity: "Task created",
-  },
-  {
-    id: "TSK-010", title: "Add pagination", type: "Development",
-    status: "In Progress", priority: "Medium", assignee: "Amit Kumar",
-    initials: "AK", parent: "US-147", estimated: 6, spent: 2,
-    dueDate: "03 Jun 2025", description: "Add pagination to registry tables.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Frontend"],
-    attachments: [], activity: "Amit Kumar updated status",
-  },
-  {
-    id: "TSK-011", title: "Cross browser testing", type: "QA",
-    status: "To Do", priority: "Low", assignee: "Sneha Patel",
-    initials: "SP", parent: "US-147", estimated: 5, spent: 0,
-    dueDate: "04 Jun 2025", description: "Test application across major browsers.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["QA"],
-    attachments: [], activity: "Task created",
-  },
-  {
-    id: "TSK-012", title: "Update documentation", type: "Documentation",
-    status: "To Do", priority: "Low", assignee: "Rahul Sharma",
-    initials: "RS", parent: "US-145", estimated: 4, spent: 0,
-    dueDate: "04 Jun 2025", description: "Update technical documentation.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Documentation"],
-    attachments: [], activity: "Task created",
-  },
-  {
-    id: "TSK-013", title: "Refactor auth module", type: "Development",
-    status: "Testing", priority: "High", assignee: "Vikas Singh",
-    initials: "VS", parent: "US-145", estimated: 10, spent: 7,
-    dueDate: "05 Jun 2025", description: "Refactor authentication module.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Security"],
-    attachments: [], activity: "Task moved to testing",
-  },
-  {
-    id: "TSK-014", title: "Security vulnerability fix", type: "Development",
-    status: "To Do", priority: "High", assignee: "Amit Kumar",
-    initials: "AK", parent: "US-146", estimated: 6, spent: 0,
-    dueDate: "05 Jun 2025", description: "Fix identified security vulnerabilities.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Security"],
-    attachments: [], activity: "Task created",
-  },
-  {
-    id: "TSK-015", title: "Accessibility improvements", type: "Design",
-    status: "To Do", priority: "Medium", assignee: "Priya Verma",
-    initials: "PV", parent: "US-146", estimated: 5, spent: 0,
-    dueDate: "06 Jun 2025", description: "Improve accessibility and keyboard navigation.",
-    project: "AI-CMS Redesign", sprint: "Sprint 12", reporter: "Mayank Swaroop",
-    reporterInitials: "MS", labels: ["Accessibility"],
-    attachments: [], activity: "Task created",
-  },
-];
-
-const people = ["Priya Verma", "Amit Kumar", "Sneha Patel", "Vikas Singh", "Rahul Sharma", "Neha Gupta"];
 const statuses: TaskStatus[] = ["To Do", "In Progress", "In Review", "Testing", "Done"];
 const priorities: Priority[] = ["High", "Medium", "Low"];
 
@@ -217,9 +75,11 @@ function MetricCard({
 }
 
 export default function TaskRegistry() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-    const router = useRouter();
-  const [selectedId, setSelectedId] = useState("TSK-001");
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [peopleList, setPeopleList] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
@@ -236,9 +96,78 @@ export default function TaskRegistry() {
   const [toast, setToast] = useState("");
   const [form, setForm] = useState({
     title: "", type: "Development", status: "To Do" as TaskStatus,
-    priority: "Medium" as Priority, assignee: people[0],
-    dueDate: "2025-06-10", estimated: "8", description: "",
+    priority: "Medium" as Priority, assignee: "Unassigned",
+    dueDate: new Date().toISOString().slice(0, 10), estimated: "8", description: "",
   });
+
+  const loadTasks = async () => {
+    try {
+      setLoading(true);
+      const [tRes, eRes] = await Promise.allSettled([
+        getTasksApi(),
+        getEmployeesApi().catch(() => []),
+      ]);
+
+      if (tRes.status === "fulfilled") {
+        const raw = tRes.value;
+        const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
+        if (Array.isArray(list)) {
+          const mapped: Task[] = list.map((t: any) => {
+            const assigneeName = t.assignedTo?.name || t.assignedToName || "Unassigned";
+            const reporterName = t.createdBy?.name || "System";
+            const init = assigneeName.split(" ").map((v: string) => v[0]).join("").slice(0, 2).toUpperCase() || "NA";
+            const repInit = reporterName.split(" ").map((v: string) => v[0]).join("").slice(0, 2).toUpperCase() || "SY";
+            return {
+              id: t.taskCode || t.code || t._id || t.id,
+              title: t.title || "Untitled Task",
+              type: t.type || "Task",
+              status: (t.status === "COMPLETED" ? "Done" : t.status === "IN_PROGRESS" ? "In Progress" : t.status === "BLOCKED" ? "Blocked" : t.status === "IN_REVIEW" ? "In Review" : "To Do") as TaskStatus,
+              priority: (t.priority || "Medium") as Priority,
+              assignee: assigneeName,
+              initials: init,
+              parent: t.parentTaskId?.title || t.userStoryId?.title || "Story",
+              estimated: t.estimatedHours || 0,
+              spent: t.loggedHours || 0,
+              dueDate: t.dueDate ? new Date(t.dueDate).toLocaleDateString("en-IN") : "—",
+              description: t.description || "",
+              project: t.projectId?.projectName || "General Project",
+              sprint: t.sprintId?.name || "Sprint",
+              reporter: reporterName,
+              reporterInitials: repInit,
+              labels: t.tags || [],
+              attachments: [],
+              activity: t.updatedAt ? new Date(t.updatedAt).toLocaleDateString("en-IN") : "Recent",
+            };
+          });
+          setTasks(mapped);
+          if (mapped.length > 0) {
+            setSelectedId(mapped[0].id);
+          }
+        } else {
+          setTasks([]);
+        }
+      } else {
+        setTasks([]);
+      }
+
+      if (eRes.status === "fulfilled" && Array.isArray(eRes.value)) {
+        const names = eRes.value.map((e: any) => e.name || e.email || "Employee");
+        setPeopleList(names);
+        if (names.length > 0 && form.assignee === "Unassigned") {
+          setForm((f) => ({ ...f, assignee: names[0] }));
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load tasks:", err);
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTasks();
+  }, []);
 
   const selectedTask = tasks.find((task) => task.id === selectedId);
 
@@ -306,7 +235,7 @@ export default function TaskRegistry() {
     setModal("edit");
   }
 
-  function saveTask(event: FormEvent<HTMLFormElement>) {
+  async function saveTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.title.trim()) return;
 
@@ -316,7 +245,7 @@ export default function TaskRegistry() {
             ...task, title: form.title, type: form.type,
             status: form.status, priority: form.priority,
             assignee: form.assignee,
-            initials: form.assignee.split(" ").map((v) => v[0]).join(""),
+            initials: form.assignee.split(" ").map((v) => v[0]).join("").slice(0, 2).toUpperCase(),
             estimated: Number(form.estimated) || 0,
             description: form.description,
           }
@@ -324,23 +253,20 @@ export default function TaskRegistry() {
       ));
       notify("Task updated successfully");
     } else {
-      const nextNumber = Math.max(...tasks.map((t) => Number(t.id.split("-")[1]))) + 1;
-      const id = `TSK-${String(nextNumber).padStart(3, "0")}`;
-      const newTask: Task = {
-        id, title: form.title, type: form.type, status: form.status,
-        priority: form.priority, assignee: form.assignee,
-        initials: form.assignee.split(" ").map((v) => v[0]).join(""),
-        parent: "US-145", estimated: Number(form.estimated) || 0,
-        spent: 0, dueDate: "10 Jun 2025",
-        description: form.description, project: "AI-CMS Redesign",
-        sprint: "Sprint 12", reporter: "Mayank Swaroop",
-        reporterInitials: "MS", labels: [], attachments: [],
-        activity: "Task created by Mayank Swaroop",
-      };
-      setTasks((old) => [newTask, ...old]);
-      setSelectedId(id);
-      setPage(1);
-      notify("Task created successfully");
+      try {
+        await createTaskApi({
+          title: form.title.trim(),
+          type: form.type,
+          status: form.status,
+          priority: form.priority,
+          estimatedHours: Number(form.estimated) || 0,
+          description: form.description.trim(),
+        });
+        await loadTasks();
+        notify("Task created successfully (synced to API)");
+      } catch (err) {
+        console.warn("Failed to create task via API:", err);
+      }
     }
     setModal(null);
   }
@@ -432,7 +358,7 @@ export default function TaskRegistry() {
             </select>
             <select value={assigneeFilter} onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1); }}>
               <option value="All">Assignee (All)</option>
-              {people.map((p) => <option key={p}>{p}</option>)}
+              {peopleList.map((p) => <option key={p}>{p}</option>)}
             </select>
             <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}>
               <option value="All">Task Type (All)</option>
@@ -625,7 +551,7 @@ export default function TaskRegistry() {
               </label>
               <label>Assignee
                 <select value={form.assignee} onChange={(e) => setForm({ ...form, assignee: e.target.value })}>
-                  {people.map((x) => <option key={x}>{x}</option>)}
+                  {peopleList.map((x) => <option key={x}>{x}</option>)}
                 </select>
               </label>
               <label>Estimated Hours

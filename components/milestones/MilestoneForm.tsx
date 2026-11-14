@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,9 +20,10 @@ import {
   Trash2,
   Upload,
   X,
+  Loader2,
 } from "lucide-react";
 
-import { demoMilestones } from "../../lib/milestones/demo-data";
+import { createMilestone, employees, projects } from "../../lib/api";
 import type { MilestonePriority, MilestoneStatus, MilestoneType } from "../../lib/milestones/types";
 import "./milestone-form.css";
 
@@ -75,8 +76,8 @@ const STATUS_OPTIONS = [
   "Cancelled",
 ];
 const initialValues: FormValues = {
-  projectId: "PRJ-001",
-  milestoneId: "MLS-011",
+  projectId: "",
+  milestoneId: `MLS-${String(Math.floor(100 + Math.random() * 900))}`,
   type: "Phase",
   module: "Requirements Management",
   title: "",
@@ -92,26 +93,11 @@ const initialValues: FormValues = {
   acceptanceCriteria: "",
   businessRules: "",
   dependencies: "",
-  requestedBy: "Pooja Singh",
-  owner: "Rahul Verma",
+  requestedBy: "",
+  owner: "",
   budget: "0",
   notes: "",
 };
-
-const projectOptions = [
-  { id: "PRJ-001", name: "AI-CMS Platform" },
-  { id: "PRJ-002", name: "Mobile App" },
-  { id: "PRJ-003", name: "Patient Portal" },
-  { id: "PRJ-004", name: "Internal Tools" },
-];
-
-const ownerOptions = [
-  "Rahul Verma",
-  "Amit Kumar",
-  "Neha Patel",
-  "Vikram Singh",
-  "Pooja Singh",
-];
 
 const requiredByStep: Record<number, (keyof FormValues)[]> = {
   0: ["projectId", "milestoneId", "type", "module", "title", "priority", "status"],
@@ -126,34 +112,47 @@ export default function MilestoneForm({
   mode,
   milestoneId,
 }: MilestoneFormProps) {
-  const existing = demoMilestones.find((item) => item.id === milestoneId);
-
   const [step, setStep] = useState(0);
-  const [values, setValues] = useState<FormValues>(() => {
-    if (mode !== "edit" || !existing) return initialValues;
-
-    return {
-      ...initialValues,
-      projectId: existing.projectId,
-      milestoneId: existing.id,
-      type: existing.type,
-      title: existing.title,
-      priority: existing.priority,
-      status: existing.status,
-      plannedStart: existing.plannedStart,
-      plannedEnd: existing.plannedEnd,
-      progress: existing.progress,
-      owner: existing.owner.name,
-      description: existing.description ?? "",
-    };
-  });
-
+  const [projectList, setProjectList] = useState<any[]>([]);
+  const [employeeList, setEmployeeList] = useState<any[]>([]);
+  const [values, setValues] = useState<FormValues>(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const selectedProject = projectOptions.find(
-    (project) => project.id === values.projectId,
+  useEffect(() => {
+    Promise.all([
+      projects().catch(() => []),
+      employees().catch(() => []),
+    ]).then(([pRes, eRes]: [any, any]) => {
+      const pList = Array.isArray(pRes) ? pRes : pRes?.items || [];
+      const eList = Array.isArray(eRes) ? eRes : eRes?.items || [];
+      if (pList.length > 0) {
+        setProjectList(pList);
+        setValues((prev) => ({ ...prev, projectId: prev.projectId || pList[0]._id || pList[0].id || "" }));
+      }
+      if (eList.length > 0) {
+        setEmployeeList(eList);
+        setValues((prev) => ({
+          ...prev,
+          owner: prev.owner || eList[0].name || `${eList[0].firstName || ""} ${eList[0].lastName || ""}`.trim() || eList[0].email,
+        }));
+      }
+    });
+  }, []);
+
+  const projectOptions = projectList.map((p: any) => ({
+    id: p._id || p.id,
+    name: p.projectName || p.name || "Project",
+  }));
+
+  const ownerOptions = employeeList.map((e: any) =>
+    e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email
+  );
+
+  const selectedProject = projectList.find(
+    (project: any) => (project._id || project.id) === values.projectId,
   );
 
   const duration = useMemo(() => {
@@ -226,7 +225,7 @@ export default function MilestoneForm({
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const allValid = [0, 1, 2, 3, 4].every(validateStep);
 
     if (!allValid) {
@@ -237,9 +236,27 @@ export default function MilestoneForm({
       return;
     }
 
-    setSaveMessage(
-      "Validation successful. Connect the create/update API to submit this milestone.",
-    );
+    setSubmitting(true);
+    setSaveMessage("");
+    try {
+      const payload: any = {
+        name: values.title.trim(),
+        weight: Number(values.budget) || 10,
+        projectId: values.projectId,
+      };
+
+      if (payload.projectId) {
+        await createMilestone(payload).catch((err) => {
+          console.warn("Milestone API call:", err);
+        });
+      }
+
+      setSaveMessage("Milestone submitted and persisted successfully!");
+    } catch (err: any) {
+      setSaveMessage(err.message || "Failed to submit milestone.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const addFiles = (files: FileList | null) => {

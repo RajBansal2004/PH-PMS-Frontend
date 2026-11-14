@@ -16,43 +16,12 @@ type RetroItem = { id: number; title: string; owner: string; score: number };
 type Action = { title: string; owner: string; due: string; status: "Completed" | "In Progress" | "Planned"; priority: "High" | "Medium" | "Low" };
 
 const initialIdeas: Record<Category, RetroItem[]> = {
-  good: [
-    { id: 1, title: "Clear sprint goal and well defined scope.", owner: "Neha Patel", score: 5 },
-    { id: 2, title: "Good collaboration between backend and frontend team.", owner: "Amit Kumar", score: 4 },
-    { id: 3, title: "Unit tests improved code quality.", owner: "Rahul Verma", score: 3 },
-    { id: 4, title: "Daily standups helped in quick issue resolution.", owner: "Pooja Singh", score: 3 },
-    { id: 5, title: "Efficient use of component library reduced development time.", owner: "Vikram Singh", score: 2 },
-    { id: 6, title: "Stakeholder feedback received early.", owner: "Neha Patel", score: 2 },
-    { id: 7, title: "Documentation was updated regularly.", owner: "Rahul Verma", score: 1 },
-  ],
-  bad: [
-    { id: 8, title: "Requirements changed multiple times.", owner: "Amit Kumar", score: -5 },
-    { id: 9, title: "Delayed API responses from third party service.", owner: "Pooja Singh", score: -4 },
-    { id: 10, title: "Some tasks were underestimated.", owner: "Vikram Singh", score: -3 },
-    { id: 11, title: "Bugs found in late testing phase.", owner: "Neha Patel", score: -3 },
-    { id: 12, title: "Limited availability of QA resource.", owner: "Rahul Verma", score: -2 },
-    { id: 13, title: "Deployment environment setup took time.", owner: "Amit Kumar", score: -1 },
-  ],
-  improve: [
-    { id: 14, title: "Freeze requirements before sprint start.", owner: "Vikram Singh", score: 5 },
-    { id: 15, title: "Improve estimation accuracy.", owner: "Amit Kumar", score: 4 },
-    { id: 16, title: "Automate integration tests.", owner: "Neha Patel", score: 3 },
-    { id: 17, title: "Improve documentation and knowledge sharing.", owner: "Pooja Singh", score: 2 },
-    { id: 18, title: "Add performance testing in next sprint.", owner: "Rahul Verma", score: 1 },
-    { id: 19, title: "Have more buffer for unexpected issues.", owner: "Amit Kumar", score: 1 },
-  ],
+  good: [],
+  bad: [],
+  improve: [],
 };
 
-const initialActions: Action[] = [
-  { title: "Setup API mock service", owner: "Vikram Singh", due: "30 May 2025", status: "Completed", priority: "High" },
-  { title: "Create estimation guidelines", owner: "Amit Kumar", due: "31 May 2025", status: "Completed", priority: "Medium" },
-  { title: "Automate regression suite", owner: "Rahul Verma", due: "02 Jun 2025", status: "In Progress", priority: "High" },
-  { title: "Improve requirements review process", owner: "Neha Patel", due: "02 Jun 2025", status: "In Progress", priority: "High" },
-  { title: "Performance benchmark setup", owner: "Pooja Singh", due: "03 Jun 2025", status: "Planned", priority: "Medium" },
-  { title: "Team knowledge sharing session", owner: "Vikram Singh", due: "04 Jun 2025", status: "Planned", priority: "Low" },
-  { title: "Increase QA bandwidth", owner: "Rahul Verma", due: "05 Jun 2025", status: "Planned", priority: "Medium" },
-  { title: "Prepare deployment checklist", owner: "Amit Kumar", due: "05 Jun 2025", status: "Planned", priority: "Low" },
-];
+const initialActions: Action[] = [];
 
 const metricRows = [
   ["Story Points", "38 SP", "38 SP", "0 SP (0%)", "On Track"],
@@ -137,7 +106,7 @@ export default function SprintRetrospective({ sprintId }: { sprintId: string }) 
     }
     setTitle("");
     setModal(null);
-    setNotice("Item added locally.");
+    setNotice("Item added.");
   };
 
   const exportCsv = () => {
@@ -158,11 +127,15 @@ export default function SprintRetrospective({ sprintId }: { sprintId: string }) 
       className={`rt-ideas rt-${category}`}
       action={<span className="rt-count">{ideas[category].length}</span>}>
       <div className="rt-idea-list">
-        {ideas[category].map(i => <div className="rt-idea" key={i.id}>
-          <span className="rt-idea-icon">{category === "good" ? <CheckCircle2 size={13}/> : category === "bad" ? <Circle size={13}/> : <Lightbulb size={13}/>}</span>
-          <div><strong>{i.title}</strong><small>by {i.owner}</small></div>
-          <span className="rt-score">{i.score > 0 ? "+" : ""}{i.score}</span>
-        </div>)}
+        {ideas[category].length ? (
+          ideas[category].map(i => <div className="rt-idea" key={i.id}>
+            <span className="rt-idea-icon">{category === "good" ? <CheckCircle2 size={13}/> : category === "bad" ? <Circle size={13}/> : <Lightbulb size={13}/>}</span>
+            <div><strong>{i.title}</strong><small>by {i.owner}</small></div>
+            <span className="rt-score">{i.score > 0 ? "+" : ""}{i.score}</span>
+          </div>)
+        ) : (
+          <p style={{ padding: "12px", color: "#667085", fontSize: "13px" }}>No items captured yet.</p>
+        )}
       </div>
       <button className="rt-add" onClick={() => setModal(category)}><Plus size={12}/> Add Item</button>
     </Card>;
@@ -254,7 +227,7 @@ export default function SprintRetrospective({ sprintId }: { sprintId: string }) 
       <Card id="rt-section-3" title="Action Items" action={<span className="rt-count">{actions.length}</span>}>
         <div className="rt-table-wrap"><table className="rt-table">
           <thead><tr><th>Action Item</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Priority</th></tr></thead>
-          <tbody>{actions.map((a,i) => <tr key={`${a.title}-${i}`}><td>{a.title}</td><td>{a.owner}</td><td>{a.due}</td><td><span className={`rt-pill ${a.status==="Completed"?"rt-green":a.status==="Planned"?"rt-blue":"rt-orange"}`}>{a.status}</span></td><td><span className={`rt-pill rt-${a.priority.toLowerCase()}`}>{a.priority}</span></td></tr>)}</tbody>
+          <tbody>{actions.length ? actions.map((a,i) => <tr key={`${a.title}-${i}`}><td>{a.title}</td><td>{a.owner}</td><td>{a.due}</td><td><span className={`rt-pill ${a.status==="Completed"?"rt-green":a.status==="Planned"?"rt-blue":"rt-orange"}`}>{a.status}</span></td><td><span className={`rt-pill rt-${a.priority.toLowerCase()}`}>{a.priority}</span></td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", padding: "16px", color: "#667085" }}>No action items recorded yet. Click &apos;Add Action Item&apos; below.</td></tr>}</tbody>
         </table></div>
         <button className="rt-add" onClick={() => setModal("action")}><Plus size={12}/> Add Action Item</button>
       </Card>

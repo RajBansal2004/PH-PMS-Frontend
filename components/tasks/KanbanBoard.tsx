@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { employees as getEmployeesApi, tasks as getTasksApi } from "../../lib/api";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Bell, CircleHelp, ChevronDown, ChevronRight,
@@ -34,140 +35,8 @@ type Task = {
   blocked?: boolean;
 };
 
-const initialTasks: Task[] = [
-  {
-    id: "TSK-101", title: "Design user profile UI", status: "To Do",
-    priority: "High", assignee: "Priya Verma", initials: "PV",
-    dueDate: "31 May 2025", hours: 5, points: 3,
-    label: "UI", labelColor: "purple", comments: 2, attachments: 1,
-  },
-  {
-    id: "TSK-102", title: "API: Get user details", status: "To Do",
-    priority: "Medium", assignee: "Amit Kumar", initials: "AK",
-    dueDate: "31 May 2025", hours: 8, points: 5,
-    label: "Backend", labelColor: "teal", comments: 1, attachments: 0,
-  },
-  {
-    id: "TSK-103", title: "Write unit tests", status: "To Do",
-    priority: "Medium", assignee: "Neha Gupta", initials: "NG",
-    dueDate: "01 Jun 2025", hours: 5, points: 3,
-    label: "QA", labelColor: "green", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-104", title: "Update documentation", status: "To Do",
-    priority: "Low", assignee: "Rahul Sharma", initials: "RS",
-    dueDate: "02 Jun 2025", hours: 4, points: 2,
-    label: "Docs", labelColor: "purple", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-045", title: "Implement login validation", status: "In Progress",
-    priority: "High", assignee: "Vikas Singh", initials: "VS",
-    dueDate: "28 May 2025", hours: 8, points: 5,
-    label: "Backend", labelColor: "teal", comments: 2, attachments: 1,
-  },
-  {
-    id: "TSK-046", title: "Create dashboard widgets", status: "In Progress",
-    priority: "High", assignee: "Priya Verma", initials: "PV",
-    dueDate: "29 May 2025", hours: 12, points: 8,
-    label: "UI", labelColor: "purple", comments: 3, attachments: 2,
-  },
-  {
-    id: "TSK-047", title: "Integrate auth module", status: "In Progress",
-    priority: "Medium", assignee: "Amit Kumar", initials: "AK",
-    dueDate: "29 May 2025", hours: 6, points: 3,
-    label: "Backend", labelColor: "teal", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-048", title: "Optimize API response", status: "In Progress",
-    priority: "Medium", assignee: "Vikas Singh", initials: "VS",
-    dueDate: "30 May 2025", hours: 6, points: 3,
-    label: "Backend", labelColor: "teal", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-021", title: "Validate user login", status: "In Review",
-    priority: "Medium", assignee: "Sneha Patel", initials: "SP",
-    dueDate: "28 May 2025", hours: 4, points: 3,
-    label: "QA", labelColor: "green", comments: 3, attachments: 2,
-  },
-  {
-    id: "TSK-022", title: "Review dashboard layout", status: "In Review",
-    priority: "Medium", assignee: "Mayank Swaroop", initials: "MS",
-    dueDate: "29 May 2025", hours: 6, points: 3,
-    label: "QA", labelColor: "green", comments: 2, attachments: 1,
-  },
-  {
-    id: "TSK-023", title: "Code review: Auth API", status: "In Review",
-    priority: "Low", assignee: "Rahul Sharma", initials: "RS",
-    dueDate: "29 May 2025", hours: 3, points: 2,
-    label: "QA", labelColor: "green", comments: 1, attachments: 0,
-  },
-  {
-    id: "TSK-024", title: "Review error handling", status: "In Review",
-    priority: "Low", assignee: "Sneha Patel", initials: "SP",
-    dueDate: "30 May 2025", hours: 3, points: 2,
-    label: "QA", labelColor: "green", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-031", title: "Test login functionality", status: "Testing",
-    priority: "Medium", assignee: "Neha Gupta", initials: "NG",
-    dueDate: "30 May 2025", hours: 5, points: 3,
-    label: "QA", labelColor: "green", comments: 2, attachments: 3,
-    progress: 66,
-  },
-  {
-    id: "TSK-032", title: "Test dashboard widgets", status: "Testing",
-    priority: "Medium", assignee: "Neha Gupta", initials: "NG",
-    dueDate: "31 May 2025", hours: 6, points: 3,
-    label: "QA", labelColor: "green", comments: 2, attachments: 1,
-    progress: 25,
-  },
-  {
-    id: "TSK-033", title: "Cross browser testing", status: "Testing",
-    priority: "Low", assignee: "Priya Verma", initials: "PV",
-    dueDate: "02 Jun 2025", hours: 5, points: 3,
-    label: "QA", labelColor: "green", comments: 0, attachments: 0,
-    progress: 0,
-  },
-  {
-    id: "TSK-034", title: "Security vulnerability test", status: "Testing",
-    priority: "High", assignee: "Amit Kumar", initials: "AK",
-    dueDate: "02 Jun 2025", hours: 8, points: 5,
-    label: "QA", labelColor: "green", comments: 1, attachments: 0,
-    progress: 0,
-  },
-  {
-    id: "TSK-001", title: "Setup project repository", status: "Done",
-    priority: "Low", assignee: "Rohit Das", initials: "RD",
-    dueDate: "26 May 2025", hours: 3, points: 2,
-    label: "DevOps", labelColor: "purple", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-002", title: "Configure CI/CD pipeline", status: "Done",
-    priority: "Low", assignee: "Rohit Das", initials: "RD",
-    dueDate: "26 May 2025", hours: 4, points: 2,
-    label: "DevOps", labelColor: "purple", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-003", title: "Create database schema", status: "Done",
-    priority: "Low", assignee: "Vikas Singh", initials: "VS",
-    dueDate: "27 May 2025", hours: 5, points: 3,
-    label: "Backend", labelColor: "teal", comments: 0, attachments: 0,
-  },
-  {
-    id: "TSK-004", title: "Design system architecture", status: "Done",
-    priority: "Low", assignee: "Rahul Sharma", initials: "RS",
-    dueDate: "27 May 2025", hours: 4, points: 2,
-    label: "Documentation", labelColor: "purple", comments: 0, attachments: 0,
-  },
-];
-
 const columns: Status[] = [
   "To Do", "In Progress", "In Review", "Testing", "Done",
-];
-
-const people = [
-  "Priya Verma", "Amit Kumar", "Sneha Patel", "Vikas Singh",
-  "Rahul Sharma", "Neha Gupta", "Rohit Das", "Mayank Swaroop",
 ];
 
 function Avatar({ initials }: { initials: string }) {
@@ -243,7 +112,67 @@ function MiniBurndown() {
 export default function KanbanBoard() {
   const router = useRouter();
 
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [people, setPeople] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadTasks = async () => {
+    try {
+      setLoading(true);
+      const [res, empRes] = await Promise.allSettled([
+        getTasksApi(),
+        getEmployeesApi().catch(() => []),
+      ]);
+
+      if (empRes.status === "fulfilled") {
+        const rawEmp = empRes.value;
+        const eList = Array.isArray(rawEmp) ? rawEmp : rawEmp?.data || rawEmp?.items || [];
+        const names = eList.map((e: any) => e.name || e.fullName || [e.firstName, e.lastName].filter(Boolean).join(" ")).filter(Boolean);
+        setPeople(names);
+      }
+
+      if (res.status === "fulfilled") {
+        const val = res.value;
+        const list = Array.isArray(val) ? val : val?.data || val?.items || [];
+        if (Array.isArray(list)) {
+          const mapped: Task[] = list.map((t: any) => {
+            const assigneeName = t.assignedTo?.name || t.assignedToName || t.assigneeId?.name || t.assignee?.name || "Unassigned";
+            const init = assigneeName.split(" ").map((v: string) => v[0]).join("").slice(0, 2).toUpperCase() || "NA";
+            return {
+              id: t.taskCode || t.code || t._id || t.id,
+              title: t.title || "Untitled Task",
+              status: (t.status === "COMPLETED" ? "Done" : t.status === "IN_PROGRESS" ? "In Progress" : t.status === "IN_REVIEW" ? "In Review" : t.status === "TESTING" ? "Testing" : "To Do") as Status,
+              priority: (t.priority || "Medium") as Priority,
+              assignee: assigneeName,
+              initials: init,
+              dueDate: t.dueDate ? new Date(t.dueDate).toLocaleDateString("en-IN") : "—",
+              hours: t.estimatedHours || 0,
+              points: Math.min(13, Math.max(1, Math.round((t.estimatedHours || 4) / 2))),
+              label: t.type || "General",
+              labelColor: t.type === "Design" ? "purple" : t.type === "QA" ? "green" : "teal",
+              comments: 0,
+              attachments: 0,
+            };
+          });
+          setTasks(mapped);
+        } else {
+          setTasks([]);
+        }
+      } else {
+        setTasks([]);
+      }
+    } catch (err) {
+      console.warn("Failed to load kanban tasks:", err);
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [assigneeFilter, setAssigneeFilter] = useState("All");

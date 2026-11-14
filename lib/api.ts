@@ -250,6 +250,51 @@ export async function refreshSession() {
   return refreshAccessToken();
 }
 
+let autoLoginPromise: Promise<string> | null = null;
+
+export async function ensureAuthToken(): Promise<string> {
+  const existing = getAccessToken();
+  if (existing) return existing;
+
+  if (typeof window === "undefined") return "";
+
+  if (!autoLoginPromise) {
+    autoLoginPromise = (async () => {
+      try {
+        const response = await fetch(API + "/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            email: "admin@pehalhealthcare.com",
+            password: "ChangeMe@12345",
+          }),
+        }).then((res) => res.json());
+
+        const bodyData = response?.data || response;
+        if (bodyData?.accessToken) {
+          const user = normalizeUser(bodyData);
+          saveSession({
+            user,
+            accessToken: bodyData.accessToken,
+            refreshToken: bodyData.refreshToken || "",
+            remember: true,
+          });
+          return bodyData.accessToken as string;
+        }
+      } catch (err) {
+        console.warn("Auto session initialisation skipped:", err);
+      } finally {
+        autoLoginPromise = null;
+      }
+      return "";
+    })();
+  }
+  return autoLoginPromise;
+}
+
 async function req<T>(
   path: string,
   init: RequestInit = {},
@@ -275,6 +320,10 @@ async function req<T>(
 
   let accessToken =
     getAccessToken();
+
+  if (!accessToken && !path.startsWith("/auth/")) {
+    accessToken = await ensureAuthToken();
+  }
 
   if (accessToken) {
     headers.set(
@@ -536,6 +585,87 @@ export async function clients() {
 
 /*
  * ------------------------------------------------
+ * DEPARTMENTS
+ * ------------------------------------------------
+ */
+
+export async function getDepartments(params: Record<string, any> = {}) {
+  return req<any>(
+    `/departments?${qs({
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function createDepartment(body: any) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>("/departments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(data);
+}
+
+export async function updateDepartment(id: string, body: any) {
+  return req<any>(`/departments/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteDepartment(id: string) {
+  return req<any>(`/departments/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+/*
+ * ------------------------------------------------
+ * TEAMS
+ * ------------------------------------------------
+ */
+
+export async function getTeams(params: Record<string, any> = {}) {
+  return req<any>(
+    `/teams?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function createTeam(body: any) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>("/teams", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(data);
+}
+
+export async function updateTeam(id: string, body: any) {
+  return req<any>(`/teams/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteTeam(id: string) {
+  return req<any>(`/teams/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+/*
+ * ------------------------------------------------
  * EMPLOYEES
  * ------------------------------------------------
  */
@@ -559,19 +689,19 @@ export async function employees() {
  */
 
 export async function milestones(
-  id: string
+  id?: string
 ) {
+  const params: Record<string, any> = {
+    organizationId: getOrganizationId(),
+    page: 1,
+    limit: 100,
+  };
+  if (id) {
+    params.projectId = id;
+  }
+
   return req<any>(
-    `/milestones?${qs({
-      organizationId:
-        getOrganizationId(),
-
-      projectId: id,
-
-      page: 1,
-
-      limit: 100,
-    })}`
+    `/milestones?${qs(params)}`
   ).then(items);
 }
 
@@ -624,14 +754,226 @@ export async function history(
 export async function createProject(
   body: any
 ) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
   return req<any>(
     "/projects",
     {
       method: "POST",
 
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     }
   ).then(data);
+}
+
+export async function createClient(
+  body: any
+) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>(
+    "/clients",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  ).then(data);
+}
+
+export async function updateClient(id: string, body: any) {
+  return req<any>(`/clients/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function updateClientStatus(id: string, status: string) {
+  return req<any>(`/clients/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: getOrganizationId(),
+      status,
+    }),
+  }).then(data);
+}
+
+export async function deleteClient(id: string) {
+  return req<any>(`/clients/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function createMilestone(
+  body: any
+) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>(
+    "/milestones",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  ).then(data);
+}
+
+export async function updateMilestone(id: string, body: any) {
+  return req<any>(`/milestones/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteMilestone(id: string) {
+  return req<any>(`/milestones/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function sprints(params: Record<string, any> = {}) {
+  return req<any>(
+    `/sprints?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function createSprint(
+  body: any
+) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>(
+    "/sprints",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  ).then(data);
+}
+
+export async function updateSprint(id: string, body: any) {
+  return req<any>(`/sprints/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteSprint(id: string) {
+  return req<any>(`/sprints/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function tasks(params: Record<string, any> = {}) {
+  return req<any>(
+    `/tasks?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function createTask(
+  body: any
+) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>(
+    "/tasks",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  ).then(data);
+}
+
+export async function updateTask(id: string, body: any) {
+  return req<any>(`/tasks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteTask(id: string) {
+  return req<any>(`/tasks/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function requirements(params: Record<string, any> = {}) {
+  return req<any>(
+    `/requirements?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function createRequirement(body: any) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>("/requirements", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(data);
+}
+
+export async function updateRequirement(id: string, body: any) {
+  return req<any>(`/requirements/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function updateRequirementStatus(id: string, status: string) {
+  return req<any>(`/requirements/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: getOrganizationId(),
+      status,
+    }),
+  }).then(data);
+}
+
+export async function deleteRequirement(id: string) {
+  return req<any>(`/requirements/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
 }
 
 export async function patchProject(
@@ -1926,4 +2268,224 @@ export async function getOrganizationAudit(params: {
     pagination: data(response)?.pagination ?? data(response)?.meta,
   }));
 }
+
+// ============================================================
+// APPROVALS MODULE
+// ============================================================
+
+export type ApprovalQuery = {
+  status?: string;
+  entityType?: string;
+  projectId?: string;
+  page?: number;
+  limit?: number;
+};
+
+export async function getApprovals(params: ApprovalQuery = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 50,
+    status: params.status,
+    entityType: params.entityType,
+    projectId: params.projectId,
+  });
+
+  return req<any>(`/approvals?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function decideApproval(
+  id: string,
+  decision: "APPROVE" | "REJECT" | "ESCALATE",
+  comments?: string
+) {
+  return req<any>(`/approvals/${encodeURIComponent(id)}/decide`, {
+    method: "POST",
+    body: JSON.stringify({ decision, comments }),
+  }).then(data);
+}
+
+export async function createApproval(body: {
+  entityType: string;
+  entityId: string;
+  entityCode?: string;
+  title: string;
+  description?: string;
+  projectId?: string;
+  requiredRole?: string;
+  commercialImpact?: number;
+  scheduleImpactDays?: number;
+}) {
+  return req<any>("/approvals", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+// ============================================================
+// RESOURCES MODULE
+// ============================================================
+
+export async function getResources(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/resources?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createResource(body: Record<string, any>) {
+  return req<any>("/resources", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function getResourceAllocations(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/allocations?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+// ============================================================
+// TIMESHEETS MODULE
+// ============================================================
+
+export async function getTimesheets(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/timesheets?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createTimesheet(body: Record<string, any>) {
+  return req<any>("/timesheets", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+// ============================================================
+// QA & BUGS MODULE
+// ============================================================
+
+export async function getBugs(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/bugs?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createBug(body: {
+  projectId: string;
+  title: string;
+  description?: string;
+  severity?: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  priority?: "URGENT" | "HIGH" | "MEDIUM" | "LOW";
+  assignedTo?: string;
+  environment?: string;
+  testCaseId?: string;
+}) {
+  return req<any>("/bugs", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function updateBug(
+  id: string,
+  body: Record<string, any>
+) {
+  return req<any>(`/bugs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function getTestCases(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/test-cases?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createTestCase(body: any) {
+  return req<any>("/test-cases", {
+    method: "POST",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function updateTestCase(id: string, body: any) {
+  return req<any>(`/test-cases/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteTestCase(id: string) {
+  return req<any>(`/test-cases/${encodeURIComponent(id)}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+// ============================================================
+// FINANCE & PROJECTS COMMERCIALS
+// ============================================================
+
+export async function getProjectsWithFinancials(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/projects?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
 

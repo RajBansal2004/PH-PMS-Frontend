@@ -7,6 +7,7 @@ import {
   ArrowLeft, UploadCloud, FileSpreadsheet, Download,
   CheckCircle2, AlertTriangle, X, FileText,
 } from "lucide-react";
+import { createClient } from "@/lib/api";
 import "../clients/client-workflow.css";
 import "./client-import.css";
 
@@ -17,14 +18,6 @@ type ImportRow = {
   manager: string;
   status: string;
 };
-
-const demoRows: ImportRow[] = [
-  { name: "City Care Hospital", type: "Enterprise", industry: "Healthcare", manager: "Rahul Verma", status: "Active" },
-  { name: "Sai Dental Clinic", type: "SME", industry: "Healthcare", manager: "Neha Patel", status: "Active" },
-  { name: "TechVista Solutions", type: "SME", industry: "IT Services", manager: "Pooja Singh", status: "Active" },
-  { name: "Elite Education", type: "Enterprise", industry: "Education", manager: "Amit Kumar", status: "Active" },
-  { name: "Prime Infra Pvt Ltd", type: "Enterprise", industry: "Construction", manager: "Rahul Verma", status: "Active" },
-];
 
 export default function ClientImport() {
   const router = useRouter();
@@ -57,7 +50,7 @@ export default function ClientImport() {
     if (!selected) return;
     const extension = selected.name.split(".").pop()?.toLowerCase();
     if (!["csv"].includes(extension ?? "")) {
-      setMessage("This demo preview supports CSV files. Excel parsing needs an XLSX parser/API.");
+      setMessage("Please upload a CSV file formatted according to the template.");
       return;
     }
 
@@ -79,12 +72,25 @@ export default function ClientImport() {
     setMessage("");
   }
 
-  function importClients() {
+  async function importClients() {
     if (!rows.length || invalidCount > 0) {
       setMessage("Please fix invalid rows before importing.");
       return;
     }
-    setStep("done");
+    try {
+      for (const r of rows) {
+        if (!r.name) continue;
+        await createClient({
+          name: r.name,
+          type: r.type || "Enterprise",
+          industry: r.industry || "Healthcare",
+          status: r.status === "Inactive" ? "INACTIVE" : "ACTIVE",
+        });
+      }
+      setStep("done");
+    } catch (err: any) {
+      setMessage(`Import error: ${err.message || "Failed to persist client records"}`);
+    }
   }
 
   const shownRows = useMemo(() => rows.slice(0, 10), [rows]);

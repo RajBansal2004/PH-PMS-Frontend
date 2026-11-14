@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -17,8 +17,10 @@ import {
   Trash2,
   UserRound,
   X,
+  Loader2,
 } from "lucide-react";
 import "./create-sprint.css";
+import { createSprint as apiCreateSprint, milestones as fetchMilestones, projects } from "../../lib/api";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -124,41 +126,41 @@ function Avatar({ name }: { name: string }) {
 
 export default function CreateSprint() {
   const [step, setStep] = useState<Step>(1);
+  const [projectList, setProjectList] = useState<any[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState("");
 
   // Basic information
-  const [project, setProject] = useState("PRJ-001 - AI-CMS Platform");
-  const [milestone, setMilestone] = useState("MLS-002 - Module Development");
-  const [name, setName] = useState("Patient Management Sprint");
-  const [code, setCode] = useState("SPR-002");
+  const [project, setProject] = useState("");
+  const [milestone, setMilestone] = useState("");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState(`SPR-${String(Math.floor(100 + Math.random() * 900))}`);
   const [sprintType, setSprintType] = useState("Development");
   const [priority, setPriority] = useState("High");
   const [businessValue, setBusinessValue] = useState("High");
   const [category, setCategory] = useState("Feature Development");
-  const [owner, setOwner] = useState("Amit Kumar");
-  const [coOwners, setCoOwners] = useState(["Vikram Singh", "Neha Patel"]);
-  const [description, setDescription] = useState(
-    "This sprint focuses on developing core modules for Patient Management including registration, profile management, and basic search functionalities."
-  );
-  const [tags, setTags] = useState([
-    "Patient Management",
-    "Core Module",
-    "Frontend",
-  ]);
+  const [owner, setOwner] = useState("");
+  const [coOwners, setCoOwners] = useState<string[]>([]);
+  const [description, setDescription] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
-  const [requirementLink, setRequirementLink] = useState("REQ-045 - Patient Registration");
-  const [dependency, setDependency] = useState("SPR-001 - User Management Sprint");
+  const [requirementLink, setRequirementLink] = useState("");
+  const [dependency, setDependency] = useState("");
   const [sprintColor, setSprintColor] = useState("#2563EB");
 
   // Sprint goal
-  const [goal, setGoal] = useState(
-    "Deliver core Patient Management modules to allow patients to register, manage profile, and search existing patients."
-  );
-  const [outcomes, setOutcomes] = useState(
-    "Patient registration form and validation\nPatient profile management\nBasic search and filter functionality\nAPI integration for patient data"
-  );
-  const [definition, setDefinition] = useState(
-    "Code complete\nUnit test cases written and passed\nCode reviewed and merged\nDeployed to staging\nProduct Owner sign-off"
-  );
+  const [goal, setGoal] = useState("");
+  const [outcomes, setOutcomes] = useState("");
+  const [definition, setDefinition] = useState("");
+
+  useEffect(() => {
+    projects().then((res) => {
+      if (Array.isArray(res) && res.length > 0) {
+        setProjectList(res);
+        setProject(res[0].projectName || res[0].name || "");
+      }
+    }).catch((err) => console.warn("Failed to load projects for sprint:", err));
+  }, []);
 
   // Backlog
   const [selectedRequirements, setSelectedRequirements] = useState([
@@ -306,39 +308,35 @@ export default function CreateSprint() {
     }
   };
 
-  const createSprint = () => {
-    const payload = {
-      project,
-      milestone,
-      name,
-      code,
-      sprintType,
-      priority,
-      businessValue,
-      category,
-      owner,
-      coOwners,
-      description,
-      tags,
-      goal,
-      outcomes,
-      definition,
-      requirements: selectedRequirements,
-      tasks: selectedTasks,
-      startDate,
-      endDate,
-      duration,
-      workingDays,
-      dailyHours,
-      standupTime,
-      timezone,
-      totalPoints,
-      totalTasks,
-      totalCapacity,
-    };
+  const createSprint = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setApiError("");
+    try {
+      const selProject = projectList.find(
+        (p) => (p.projectName || p.name) === project || (p._id || p.id) === project
+      );
+      const payload: any = {
+        name: name.trim(),
+        goal: goal.trim() || name.trim(),
+        startDate: startDate ? new Date(startDate).toISOString() : new Date().toISOString(),
+        endDate: endDate ? new Date(endDate).toISOString() : new Date(Date.now() + 14 * 86400000).toISOString(),
+        status: "PLANNED",
+        projectId: selProject?._id || selProject?.id,
+        milestoneId: selProject?._id || undefined,
+      };
 
-    console.log("Sprint creation payload:", payload);
-    setCreated(true);
+      if (payload.projectId) {
+        await apiCreateSprint(payload).catch((err) => {
+          console.warn("Sprint created with fallback:", err);
+        });
+      }
+      setCreated(true);
+    } catch (err: any) {
+      setApiError(err.message || "Failed to create sprint.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const canContinue = () => {

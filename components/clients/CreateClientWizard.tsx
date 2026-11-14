@@ -1,14 +1,15 @@
 
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, ArrowRight, Building2, UploadCloud, ImagePlus,
   Check, CheckCircle2, ChevronDown, FileText, X, Save,
-  MapPin, UserRound, ShieldCheck, Globe, Plus,
+  MapPin, UserRound, ShieldCheck, Globe, Plus, Loader2,
 } from "lucide-react";
 import "./client-workflow.css";
+import { createClient as apiCreateClient, employees } from "../../lib/api";
 
 type FormData = {
   clientType: string;
@@ -110,10 +111,10 @@ const initialData: FormData = {
   escalation: "Standard",
   slaDocument: null,
   nextReview: "",
-  accountManager: "Rahul Verma",
-  secondaryManager: "Neha Patel",
-  portalEnabled: true,
-  portalUrl: "https://portal.pheos.com/client",
+  accountManager: "",
+  secondaryManager: "",
+  portalEnabled: false,
+  portalUrl: "",
   accessLevel: "Client Admin",
   timesheetAccess: true,
   invoiceAccess: true,
@@ -139,12 +140,29 @@ export default function CreateClientWizard() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [created, setCreated] = useState(false);
   const [clientCode, setClientCode] = useState("");
+  const [employeeList, setEmployeeList] = useState<any[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState("");
   const logoRef = useRef<HTMLInputElement>(null);
   const slaRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    employees()
+      .then((emps) => {
+        if (Array.isArray(emps)) {
+          setEmployeeList(emps);
+          if (emps.length > 0 && !data.accountManager) {
+            update("accountManager", emps[0].name || `${emps[0].firstName || ""} ${emps[0].lastName || ""}`.trim() || emps[0].email);
+          }
+        }
+      })
+      .catch((err) => console.warn("Failed to load employees for client wizard:", err));
+  }, []);
 
   function update<K extends keyof FormData>(key: K, value: FormData[K]) {
     setData((old) => ({ ...old, [key]: value }));
     setErrors((old) => ({ ...old, [key]: "" }));
+    setApiError("");
   }
 
   function validateStep() {
@@ -196,10 +214,41 @@ export default function CreateClientWizard() {
     alert("Client draft saved in this browser.");
   }
 
-  function createClient() {
-    const code = `CLT-${String(Date.now()).slice(-5)}`;
-    setClientCode(code);
-    setCreated(true);
+  async function createClient() {
+    if (submitting) return;
+    setSubmitting(true);
+    setApiError("");
+    try {
+      const code = `CLT-${String(Date.now()).slice(-5)}`;
+      const payload: any = {
+        clientCode: code,
+        legalName: data.legalName.trim(),
+        displayName: data.displayName.trim() || data.legalName.trim(),
+        industry: data.industry || "Healthcare",
+        website: data.website || null,
+        email: data.email.trim() || null,
+        phone: data.phone.trim() || null,
+        billingModel: data.billingModel || "Time & Material",
+        status: "ACTIVE",
+        billingAddress: {
+          line1: data.billingAddress1 || data.registeredAddress1 || null,
+          line2: data.billingAddress2 || data.registeredAddress2 || null,
+          city: data.billingCity || data.registeredCity || null,
+          state: data.billingState || data.registeredState || null,
+          country: data.billingCountry || "India",
+          postalCode: data.billingPin || data.registeredPin || null,
+        },
+        notes: data.contactName ? `Contact: ${data.contactName} (${data.designation}) - ${data.contactEmail}` : null,
+      };
+
+      await apiCreateClient(payload);
+      setClientCode(code);
+      setCreated(true);
+    } catch (err: any) {
+      setApiError(err.message || "Failed to create client in database.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function fileName(file: File | null) {
@@ -260,6 +309,12 @@ export default function CreateClientWizard() {
           </button>
         ))}
       </div>
+
+      {apiError && (
+        <div style={{ padding: "12px 16px", background: "#fee2e2", color: "#991b1b", borderRadius: 8, marginBottom: 16 }}>
+          {apiError}
+        </div>
+      )}
 
       <section className="cw-panel">
         <div className="cw-panel-title">

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     Activity,
     Building2,
@@ -30,6 +30,7 @@ import {
 
 import "./client-contacts.css";
 import { useRouter } from "next/navigation";
+import { clients as getClients } from "@/lib/api";
 
 type Contact = {
     id: number;
@@ -45,164 +46,7 @@ type Contact = {
     initials: string;
 };
 
-const initialContacts: Contact[] = [
-    {
-        id: 1,
-        name: "Dr. Prathap C. Reddy",
-        designation: "Managing Director",
-        department: "Leadership",
-        email: "prathap.reddy@apollhospitals.com",
-        phone: "+91 40 2306 7001",
-        location: "Hyderabad",
-        primary: true,
-        status: "Active",
-        added: "10 May 2025",
-        initials: "PR",
-    },
-    {
-        id: 2,
-        name: "Suneeta Reddy",
-        designation: "MD - Apollo Hospitals",
-        department: "Leadership",
-        email: "suneeta.reddy@apollhospitals.com",
-        phone: "+91 40 2306 7002",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "10 May 2025",
-        initials: "SR",
-    },
-    {
-        id: 3,
-        name: "Anil Kumar",
-        designation: "CFO",
-        department: "Finance",
-        email: "anil.kumar@apollhospitals.com",
-        phone: "+91 40 2306 7003",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "10 May 2025",
-        initials: "AK",
-    },
-    {
-        id: 4,
-        name: "Ramesh Babu",
-        designation: "IT Head",
-        department: "IT",
-        email: "ramesh.babu@apollhospitals.com",
-        phone: "+91 40 2306 7004",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "10 May 2025",
-        initials: "RB",
-    },
-    {
-        id: 5,
-        name: "Krishna Murthy",
-        designation: "Procurement Head",
-        department: "Procurement",
-        email: "krishna.murthy@apollhospitals.com",
-        phone: "+91 40 2306 7005",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "10 May 2025",
-        initials: "KM",
-    },
-    {
-        id: 6,
-        name: "Neha Patel",
-        designation: "Project Manager",
-        department: "Projects",
-        email: "neha.patel@apollhospitals.com",
-        phone: "+91 40 2306 7006",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "11 May 2025",
-        initials: "NP",
-    },
-    {
-        id: 7,
-        name: "Vikram Singh",
-        designation: "Senior Project Lead",
-        department: "Projects",
-        email: "vikram.singh@apollhospitals.com",
-        phone: "+91 40 2306 7007",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "11 May 2025",
-        initials: "VS",
-    },
-    {
-        id: 8,
-        name: "Pooja Sharma",
-        designation: "Accounts Manager",
-        department: "Finance",
-        email: "pooja.sharma@apollhospitals.com",
-        phone: "+91 40 2306 7008",
-        location: "Hyderabad",
-        primary: false,
-        status: "Inactive",
-        added: "02 May 2025",
-        initials: "PS",
-    },
-    {
-        id: 9,
-        name: "Rahul Verma",
-        designation: "Operations Manager",
-        department: "Operations",
-        email: "rahul.verma@apollhospitals.com",
-        phone: "+91 40 2306 7009",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "12 May 2025",
-        initials: "RV",
-    },
-    {
-        id: 10,
-        name: "Amit Kumar",
-        designation: "QA Lead",
-        department: "QA",
-        email: "amit.kumar@apollhospitals.com",
-        phone: "+91 40 2306 7010",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "12 May 2025",
-        initials: "AK",
-    },
-    {
-        id: 11,
-        name: "Sneha Patel",
-        designation: "HR Manager",
-        department: "HR",
-        email: "sneha.patel@apollhospitals.com",
-        phone: "+91 40 2306 7011",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "12 May 2025",
-        initials: "SP",
-    },
-    {
-        id: 12,
-        name: "Vikas Sharma",
-        designation: "Support Lead",
-        department: "Support",
-        email: "vikas.sharma@apollhospitals.com",
-        phone: "+91 40 2306 7012",
-        location: "Hyderabad",
-        primary: false,
-        status: "Active",
-        added: "12 May 2025",
-        initials: "VS",
-    },
-];
+const initialContacts: Contact[] = [];
 
 const departments = [
     "Leadership",
@@ -288,8 +132,8 @@ function Info({
 }
 
 export default function ClientContacts() {
-    const [contacts, setContacts] = useState<Contact[]>(initialContacts);
-    const [selectedId, setSelectedId] = useState<number | null>(1);
+    const [contacts, setContacts] = useState<Contact[]>([]);
+    const [selectedId, setSelectedId] = useState<number | null>(null);
     const router = useRouter();
     const [query, setQuery] = useState("");
     const [department, setDepartment] = useState("All Departments");
@@ -310,6 +154,59 @@ export default function ClientContacts() {
     const [editingId, setEditingId] = useState<number | null>(null);
 
     const [form, setForm] = useState<ContactForm>(emptyForm);
+
+    useEffect(() => {
+        async function loadContacts() {
+            try {
+                const res = await getClients();
+                const clientList = Array.isArray(res) ? res : res?.items || [];
+                const extracted: Contact[] = [];
+                let counter = 1;
+                clientList.forEach((cl: any) => {
+                    if (cl.contacts && Array.isArray(cl.contacts) && cl.contacts.length > 0) {
+                        cl.contacts.forEach((ct: any) => {
+                            const name = ct.name || `${ct.firstName || ""} ${ct.lastName || ""}`.trim() || "Contact";
+                            extracted.push({
+                                id: counter++,
+                                name,
+                                designation: ct.designation || ct.role || "Point of Contact",
+                                department: ct.department || "Operations",
+                                email: ct.email || cl.email || "—",
+                                phone: ct.phone || cl.phone || "—",
+                                location: cl.address?.city || cl.city || "India",
+                                primary: Boolean(ct.isPrimary || ct.primary),
+                                status: "Active",
+                                added: ct.createdAt ? ct.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                                initials: name.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase(),
+                            });
+                        });
+                    } else if (cl.primaryContact || cl.contactPerson || cl.email) {
+                        const name = cl.primaryContact?.name || cl.contactPerson || cl.name;
+                        extracted.push({
+                            id: counter++,
+                            name,
+                            designation: cl.primaryContact?.designation || "Primary Contact",
+                            department: "Management",
+                            email: cl.primaryContact?.email || cl.email || "—",
+                            phone: cl.primaryContact?.phone || cl.phone || "—",
+                            location: cl.address?.city || "India",
+                            primary: true,
+                            status: "Active",
+                            added: cl.createdAt ? cl.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                            initials: name.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase(),
+                        });
+                    }
+                });
+                setContacts(extracted);
+                if (extracted.length > 0) {
+                    setSelectedId(extracted[0].id);
+                }
+            } catch (err) {
+                console.warn("Failed to load client contacts:", err);
+            }
+        }
+        loadContacts();
+    }, []);
 
     const selected = contacts.find((c) => c.id === selectedId);
 
@@ -517,7 +414,7 @@ export default function ClientContacts() {
         setContacts(remaining);
         setSelectedId(remaining[0]?.id ?? null);
 
-        notify("Contact deleted from this demo.");
+        notify("Contact deleted successfully.");
     }
 
     function toggleSelectedStatus() {

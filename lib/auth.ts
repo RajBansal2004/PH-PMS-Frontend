@@ -42,7 +42,13 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
-export function getOrganizationId() { return read(ORG_KEY); }
+export function getOrganizationId() {
+  const org = read(ORG_KEY);
+  if (org) return org;
+  const user = getStoredUser();
+  if (user?.organizationId) return String(user.organizationId);
+  return "";
+}
 
 export function decodeJwt<T = Record<string, any>>(token: string): T | null {
   try {

@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -25,8 +25,7 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-
-import { demoActivities, demoMilestones } from "../../lib/milestones/demo-data";
+import { milestones as getMilestonesApi } from "../../lib/api";
 import type {
   Milestone,
   MilestonePriority,
@@ -126,7 +125,51 @@ export default function MilestoneRegistry() {
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
-  const milestones = demoMilestones;
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadMilestones() {
+      try {
+        setLoading(true);
+        const res = await getMilestonesApi();
+        if (Array.isArray(res)) {
+          const mapped: Milestone[] = res.map((m: any) => ({
+            id: m.milestoneCode || m.code || m._id || m.id,
+            title: m.name || "Milestone",
+            projectId: m.projectId?._id || m.projectId || "PRJ",
+            projectName: m.projectId?.projectName || "Project",
+            type: m.billingType || "Delivery",
+            status: (m.status === "COMPLETED" ? "Completed" : m.status === "IN_PROGRESS" ? "In Progress" : m.status === "AT_RISK" ? "At Risk" : "Upcoming") as MilestoneStatus,
+            plannedStart: m.startDate ? m.startDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
+            plannedEnd: m.dueDate ? m.dueDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
+            actualEnd: m.completedAt ? m.completedAt.slice(0, 10) : undefined,
+            progress: m.progress || 0,
+            tasksTotal: m.taskCount || 0,
+            tasksCompleted: m.completedTaskCount || 0,
+            deliverablesTotal: 0,
+            deliverablesCompleted: 0,
+            billingPercentage: m.weight || 0,
+            owner: {
+              id: m.ownerId || "owner",
+              name: m.ownerName || "Unassigned",
+              initials: (m.ownerName || "UN").slice(0, 2).toUpperCase(),
+            },
+            priority: (m.priority || "Medium") as MilestonePriority,
+          }));
+          setMilestones(mapped);
+        } else {
+          setMilestones([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load milestones:", err);
+        setMilestones([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadMilestones();
+  }, []);
 
   const projects = useMemo(
     () => Array.from(new Map(
@@ -571,17 +614,21 @@ export default function MilestoneRegistry() {
                   </tr>
                 </thead>
                 <tbody>
-                  {demoActivities.map((activity) => (
-                    <tr key={activity.id}>
-                      <td><Link className="ml-id-link" href={`/milestones/${activity.milestoneId}`}>{activity.milestoneId}</Link></td>
-                      <td>{activity.milestoneTitle}</td>
-                      <td>{activity.projectId}</td>
-                      <td className="ml-activity-change">{activity.change}</td>
-                      <td>{activity.changedBy}</td>
-                      <td>{activity.changedAt}</td>
-                      <td>{activity.comment || "—"}</td>
-                    </tr>
-                  ))}
+                  {milestones.length === 0 ? (
+                    <tr><td colSpan={7} className="ml-empty" style={{ textAlign: "center", padding: "1.5rem" }}>No milestone activity recorded yet.</td></tr>
+                  ) : (
+                    milestones.slice(0, 5).map((m) => (
+                      <tr key={m.id}>
+                        <td><Link className="ml-id-link" href={`/milestones/${m.id}`}>{m.id}</Link></td>
+                        <td>{m.title}</td>
+                        <td>{m.projectName}</td>
+                        <td className="ml-activity-change">{m.status}</td>
+                        <td>{m.owner.name}</td>
+                        <td>{m.plannedStart}</td>
+                        <td>—</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

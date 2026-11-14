@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   CalendarDays,
@@ -15,6 +15,7 @@ import {
   FileText,
   MoreHorizontal,
 } from "lucide-react";
+import { milestones as getMilestones } from "@/lib/api";
 import "./milestone-timeline.css";
 
 type Status = "Completed" | "In Progress" | "Upcoming" | "Overdue";
@@ -30,117 +31,6 @@ type Milestone = {
   owner: string;
   predecessor?: string;
 };
-
-const DATA: Milestone[] = [
-  {
-    id: "MLS-001",
-    title: "Project Kickoff",
-    start: "2025-05-01",
-    end: "2025-05-05",
-    days: 5,
-    status: "Completed",
-    progress: 100,
-    owner: "Mayank Swaroop",
-  },
-  {
-    id: "MLS-002",
-    title: "Requirements Sign-off",
-    start: "2025-05-06",
-    end: "2025-05-15",
-    days: 10,
-    status: "Completed",
-    progress: 100,
-    owner: "Neha Patel",
-    predecessor: "MLS-001",
-  },
-  {
-    id: "MLS-003",
-    title: "Design Completion",
-    start: "2025-05-16",
-    end: "2025-05-30",
-    days: 15,
-    status: "In Progress",
-    progress: 70,
-    owner: "Vikram Singh",
-    predecessor: "MLS-002",
-  },
-  {
-    id: "MLS-004",
-    title: "Module Development",
-    start: "2025-06-01",
-    end: "2025-07-30",
-    days: 60,
-    status: "In Progress",
-    progress: 40,
-    owner: "Vikram Singh",
-    predecessor: "MLS-003",
-  },
-  {
-    id: "MLS-005",
-    title: "Internal QA",
-    start: "2025-08-01",
-    end: "2025-08-20",
-    days: 20,
-    status: "Upcoming",
-    progress: 0,
-    owner: "QA Team",
-    predecessor: "MLS-004",
-  },
-  {
-    id: "MLS-006",
-    title: "UAT Completion",
-    start: "2025-08-21",
-    end: "2025-09-05",
-    days: 16,
-    status: "Upcoming",
-    progress: 0,
-    owner: "Client Team",
-    predecessor: "MLS-005",
-  },
-  {
-    id: "MLS-007",
-    title: "Production Release",
-    start: "2025-09-06",
-    end: "2025-09-10",
-    days: 5,
-    status: "Upcoming",
-    progress: 0,
-    owner: "DevOps Team",
-    predecessor: "MLS-006",
-  },
-  {
-    id: "MLS-008",
-    title: "Post Release Support",
-    start: "2025-09-11",
-    end: "2025-09-25",
-    days: 15,
-    status: "Upcoming",
-    progress: 0,
-    owner: "Support Team",
-    predecessor: "MLS-007",
-  },
-  {
-    id: "MLS-009",
-    title: "Discovery Phase",
-    start: "2025-04-20",
-    end: "2025-05-05",
-    days: 15,
-    status: "Overdue",
-    progress: 35,
-    owner: "Mayank Swaroop",
-  },
-  {
-    id: "MLS-010",
-    title: "Prototype Approval",
-    start: "2025-05-06",
-    end: "2025-05-20",
-    days: 15,
-    status: "Completed",
-    progress: 100,
-    owner: "Neha Patel",
-    predecessor: "MLS-009",
-  },
-];
 
 const S = (s: Status) => s.toLowerCase().replace(" ", "-");
 
@@ -183,6 +73,8 @@ function Pill({ status }: { status: Status }) {
 }
 
 export default function MilestoneTimeline() {
+  const [data, setData] = useState<Milestone[]>([]);
+  const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"timeline" | "dependency" | "list">(
     "timeline"
   );
@@ -192,20 +84,73 @@ export default function MilestoneTimeline() {
   const [filters, setFilters] = useState(false);
   const [zoom, setZoom] = useState(1);
 
+  useEffect(() => {
+    async function fetchTimeline() {
+      setLoading(true);
+      try {
+        const res = await getMilestones();
+        const list = Array.isArray(res) ? res : (res as any)?.items || [];
+        const mapped: Milestone[] = list.map((m: any, idx: number) => {
+          let mappedStatus: Status = "In Progress";
+          const rawSt = String(m.status || "").toUpperCase();
+          if (rawSt === "COMPLETED") mappedStatus = "Completed";
+          else if (
+            rawSt === "UPCOMING" ||
+            rawSt === "NOT STARTED" ||
+            rawSt === "PLANNED"
+          )
+            mappedStatus = "Upcoming";
+          else if (rawSt === "OVERDUE") mappedStatus = "Overdue";
+
+          const startDate = m.startDate
+            ? m.startDate.slice(0, 10)
+            : new Date().toISOString().slice(0, 10);
+          const endDate = m.endDate
+            ? m.endDate.slice(0, 10)
+            : new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10);
+          const days = Math.max(
+            1,
+            Math.ceil(
+              (new Date(endDate).getTime() - new Date(startDate).getTime()) /
+                86400000
+            )
+          );
+
+          return {
+            id: m.code || `MLS-${String(idx + 1).padStart(3, "0")}`,
+            title: m.name || m.title || "Milestone",
+            start: startDate,
+            end: endDate,
+            days,
+            status: mappedStatus,
+            progress: m.weight || m.progress || 0,
+            owner: m.owner?.name || "Admin",
+          };
+        });
+        setData(mapped);
+      } catch (err) {
+        console.warn("Failed to fetch milestone timeline:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchTimeline();
+  }, []);
+
   const rows = useMemo(
     () =>
-      DATA.filter(
+      data.filter(
         (m) =>
           (m.id + " " + m.title + " " + m.owner)
             .toLowerCase()
             .includes(query.toLowerCase()) &&
           (status === "All" || m.status === status)
       ),
-    [query, status]
+    [data, query, status]
   );
 
   const counts = (s: Status) =>
-    DATA.filter((m) => m.status === s).length;
+    data.filter((m) => m.status === s).length;
 
   const exportCSV = () => {
     const csv = [
@@ -504,7 +449,7 @@ export default function MilestoneTimeline() {
                 <Dependency />
 
                 <div className="ml-stack">
-                  <FloatTable />
+                  <FloatTable data={data} />
                   <Baseline />
                 </div>
               </div>
@@ -615,7 +560,7 @@ export default function MilestoneTimeline() {
             <h2>Critical Path</h2>
             <p className="ml-muted">Milestones on the critical path</p>
 
-            {DATA.slice(0, 6).map((m, i) => (
+            {data.slice(0, 6).map((m, i) => (
               <div className="ml-critical" key={m.id}>
                 <b>{i + 1}</b>
 
@@ -796,7 +741,7 @@ function Dependency({ large = false }: { large?: boolean }) {
   );
 }
 
-function FloatTable() {
+function FloatTable({ data = [] }: { data?: Milestone[] }) {
   return (
     <section className="ml-card">
       <h2>Slack / Float &amp; Delay</h2>
@@ -812,14 +757,18 @@ function FloatTable() {
         </thead>
 
         <tbody>
-          {DATA.map((m) => (
-            <tr key={m.id}>
-              <td>{m.id}</td>
-              <td>{m.id === "MLS-009" ? "-15d" : "0d"}</td>
-              <td>{m.id === "MLS-009" ? "-15d" : "0d"}</td>
-              <td>{m.id === "MLS-009" ? "15d" : "-"}</td>
-            </tr>
-          ))}
+          {data.length === 0 ? (
+            <tr><td colSpan={4} style={{ textAlign: "center", padding: "12px", color: "#6b7280" }}>No milestones</td></tr>
+          ) : (
+            data.map((m) => (
+              <tr key={m.id}>
+                <td>{m.id}</td>
+                <td>0d</td>
+                <td>0d</td>
+                <td>-</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </section>

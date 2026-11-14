@@ -1,8 +1,7 @@
-
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUpRight,
@@ -23,62 +22,16 @@ import {
   Users,
 } from "lucide-react";
 
-import { demoMilestones } from "../../lib/milestones/demo-data";
+import {
+  milestones as getMilestones,
+  tasks as getTasks,
+  createTask as apiCreateTask,
+} from "@/lib/api";
 import "./milestone-detail.css";
-
-const tabs = [
-  "Overview",
-  "Schedule & Progress",
-  "Deliverables",
-  "Dependencies",
-  "Tasks (8)",
-  "Resources (4)",
-  "Documents (3)",
-  "Approvals (2)",
-  "Comments (3)",
-  "History",
-];
-
-const deliverables = [
-  { name: "BRD - Requirements Management", type: "Document", status: "Approved", version: "v1.0" },
-  { name: "Functional Specification", type: "Document", status: "Approved", version: "v1.1" },
-  { name: "System Architecture", type: "Document", status: "Approved", version: "v1.0" },
-  { name: "Data Flow Diagrams", type: "Document", status: "Approved", version: "v1.0" },
-  { name: "UI/UX Wireframes", type: "Document", status: "In Review", version: "v1.2" },
-  { name: "API Specification", type: "Document", status: "Pending", version: "—" },
-];
-
-const tasks = [
-  { id: "TSK-045", title: "Create System Architecture", status: "Completed", progress: 100 },
-  { id: "TSK-046", title: "Design Data Flow Diagrams", status: "Completed", progress: 100 },
-  { id: "TSK-047", title: "Prepare UI/UX Wireframes", status: "In Progress", progress: 70 },
-  { id: "TSK-048", title: "Review BRD Documents", status: "In Progress", progress: 50 },
-  { id: "TSK-049", title: "API Design", status: "To Do", progress: 0 },
-];
-
-const dependencies = [
-  { id: "DEP-001", title: "BRD Finalization", type: "Finish to Start (FS)", dependsOn: "MLS-001 - Project Kickoff", impact: "High", status: "Completed" },
-  { id: "DEP-002", title: "Infrastructure Setup", type: "Start to Start (SS)", dependsOn: "INF-001 - Server Provisioning", impact: "Medium", status: "Completed" },
-  { id: "DEP-003", title: "UI Standards Approval", type: "Finish to Finish (FF)", dependsOn: "DSN-001 - Design System", impact: "Medium", status: "In Progress" },
-];
-
-const stakeholders = [
-  { name: "Amit Kumar", role: "Project Manager", status: "Approved", initials: "AK" },
-  { name: "Rahul Verma", role: "Tech Lead", status: "In Review", initials: "RV" },
-  { name: "Pooja Singh", role: "Product Owner", status: "Approved", initials: "PS" },
-  { name: "Vikram Singh", role: "QA Lead", status: "Pending", initials: "VS" },
-];
-
-const activities = [
-  { date: "18 May 2025, 11:20 AM", text: "Rahul Verma marked milestone as In Review", initials: "RV" },
-  { date: "17 May 2025, 04:45 PM", text: "Neha Patel updated milestone details", initials: "NP" },
-  { date: "16 May 2025, 10:30 AM", text: "Pooja Singh submitted milestone for review", initials: "PS" },
-  { date: "15 May 2025, 09:30 AM", text: "Milestone created by Mayank Swaroop", initials: "MS" },
-];
 
 function initials(name: string) {
   return name
-    .split(" ")
+    .split(/\s+/)
     .map((part) => part[0])
     .join("")
     .slice(0, 2)
@@ -86,7 +39,7 @@ function initials(name: string) {
 }
 
 function Status({ value }: { value: string }) {
-  const className = value.toLowerCase().replaceAll(" ", "-");
+  const className = (value || "in-progress").toLowerCase().replaceAll(" ", "-");
   return <span className={`md-status ${className}`}>{value}</span>;
 }
 
@@ -95,43 +48,76 @@ export default function MilestoneDetail({
 }: {
   milestoneId: string;
 }) {
-  const milestone = demoMilestones.find((item) => item.id === milestoneId);
+  const [milestone, setMilestone] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [tasksList, setTasksList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState("Overview");
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [comment, setComment] = useState("");
-  const [comments, setComments] = useState([
-    { name: "Rahul Verma", text: "Architecture review is completed. UI wireframes are in progress." },
-    { name: "Pooja Singh", text: "Please ensure all acceptance criteria are covered before approval." },
-    { name: "Neha Patel", text: "Updated the design documents for review." },
-  ]);
+  const [comments, setComments] = useState<{ name: string; text: string }[]>([]);
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
 
-  const progress = milestone?.progress ?? 65;
-  const title = milestone?.title ?? "Design Completion";
-  const owner = milestone?.owner?.name ?? "Neha Patel";
-  const projectId = milestone?.projectId ?? "PRJ-001";
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true);
+      try {
+        const [mlsRes, tskRes] = await Promise.allSettled([
+          getMilestones(),
+          getTasks({ limit: 100 }),
+        ]);
+
+        if (mlsRes.status === "fulfilled" && mlsRes.value) {
+          const list = Array.isArray(mlsRes.value)
+            ? mlsRes.value
+            : (mlsRes.value as any)?.items || [];
+          const found = list.find(
+            (m: any) =>
+              m._id === milestoneId ||
+              m.id === milestoneId ||
+              m.code === milestoneId
+          );
+          if (found) {
+            setMilestone(found);
+          } else if (list.length > 0) {
+            setMilestone(list[0]);
+          }
+        }
+
+        if (tskRes.status === "fulfilled" && tskRes.value) {
+          const rawTasks = Array.isArray(tskRes.value)
+            ? tskRes.value
+            : (tskRes.value as any)?.items || [];
+          setTasksList(rawTasks);
+        }
+      } catch (err) {
+        console.warn("Failed to load milestone detail:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadData();
+  }, [milestoneId]);
+
+  const progress = milestone?.progress ?? milestone?.weight ?? 0;
+  const title = milestone?.name ?? milestone?.title ?? "Milestone Details";
+  const owner = milestone?.owner?.name ?? "Admin";
+  const projectId = milestone?.projectId?.code ?? milestone?.projectId ?? "PRJ";
   const type = milestone?.type ?? "Phase";
   const status = milestone?.status ?? "In Progress";
-  const priority = milestone?.priority ?? "High";
-  const start = milestone?.plannedStart ?? "2025-05-16";
-  const end = milestone?.plannedEnd ?? "2025-05-30";
+  const priority = milestone?.priority ?? "Medium";
+  const start = milestone?.startDate ? milestone.startDate.slice(0, 10) : "—";
+  const end = milestone?.endDate ? milestone.endDate.slice(0, 10) : "—";
 
   const duration = useMemo(() => {
+    if (!start || !end || start === "—" || end === "—") return 15;
     const startDate = new Date(`${start}T00:00:00`);
     const endDate = new Date(`${end}T00:00:00`);
-    const days = Math.ceil((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+    const days =
+      Math.ceil((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
     return Number.isFinite(days) && days > 0 ? days : 15;
   }, [start, end]);
-
-  if (!milestone) {
-    return (
-      <section className="md-not-found">
-        <FileText size={34} />
-        <h1>Milestone not found</h1>
-        <p>The requested milestone could not be found in the current registry data.</p>
-        <Link href="/milestones">Back to Milestone Registry</Link>
-      </section>
-    );
-  }
 
   const addComment = () => {
     if (!comment.trim()) return;
@@ -142,6 +128,63 @@ export default function MilestoneDetail({
     setComment("");
   };
 
+  const handleCreateTask = async () => {
+    if (!newTaskTitle.trim()) return;
+    try {
+      const created = await apiCreateTask({
+        title: newTaskTitle.trim(),
+        milestoneId: milestone?._id || milestoneId,
+      });
+      setTasksList((prev) => [
+        {
+          _id: created?._id || `TSK-${prev.length + 1}`,
+          title: newTaskTitle.trim(),
+          status: "TODO",
+          progress: 0,
+        },
+        ...prev,
+      ]);
+      setNewTaskTitle("");
+      setShowAddTask(false);
+    } catch (err) {
+      console.warn("Create task error:", err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <section className="md-not-found">
+        <FileText size={34} />
+        <h1>Loading Milestone...</h1>
+        <p>Fetching milestone details from the database.</p>
+      </section>
+    );
+  }
+
+  if (!milestone) {
+    return (
+      <section className="md-not-found">
+        <FileText size={34} />
+        <h1>Milestone not found</h1>
+        <p>No milestone records match this ID in the database.</p>
+        <Link href="/milestones">Back to Milestone Registry</Link>
+      </section>
+    );
+  }
+
+  const tabs = [
+    "Overview",
+    "Schedule & Progress",
+    "Deliverables",
+    "Dependencies",
+    `Tasks (${tasksList.length})`,
+    "Resources",
+    "Documents",
+    "Approvals",
+    `Comments (${comments.length})`,
+    "History",
+  ];
+
   const renderOverview = () => (
     <>
       <div className="md-overview-grid">
@@ -149,51 +192,70 @@ export default function MilestoneDetail({
           <h2>Description</h2>
           <p>
             {milestone.description ||
-              "This milestone represents the completion of system design and all design deliverables required for the project phase."}
+              "This milestone represents a key project checkpoint and its associated deliverables."}
           </p>
           <div className="md-two-content">
             <div>
               <h3>Business Objective</h3>
-              <p>Ensure all design artifacts are complete, reviewed and approved by stakeholders before moving to the development phase.</p>
+              <p>
+                Ensure project requirements and progress criteria meet target
+                milestone parameters.
+              </p>
             </div>
             <div>
               <h3>Acceptance Criteria</h3>
               <ul className="md-check-list">
-                <li><CheckCircle2 /> All BRD documents are approved.</li>
-                <li><CheckCircle2 /> Functional specifications are finalized.</li>
-                <li><CheckCircle2 /> System design and architecture are reviewed.</li>
-                <li><CheckCircle2 /> UI/UX wireframes are approved.</li>
-                <li><CheckCircle2 /> Dependencies are identified and documented.</li>
+                <li>
+                  <CheckCircle2 /> Project deliverables are validated.
+                </li>
+                <li>
+                  <CheckCircle2 /> Acceptance testing is verified.
+                </li>
+                <li>
+                  <CheckCircle2 /> Dependencies are resolved.
+                </li>
               </ul>
             </div>
-          </div>
-          <div className="md-business-rules">
-            <h3>Business Rules</h3>
-            <ul>
-              <li>Design documents must follow the organization template.</li>
-              <li>All changes must be version controlled.</li>
-              <li>Stakeholder sign-off is mandatory.</li>
-            </ul>
           </div>
         </section>
 
         <section className="md-card">
           <div className="md-card-heading">
-            <h2>Deliverables</h2>
-            <button type="button" onClick={() => setActiveTab("Deliverables")}>View All <ArrowUpRight size={13} /></button>
+            <h2>Linked Tasks</h2>
+            <button
+              type="button"
+              onClick={() => setActiveTab(`Tasks (${tasksList.length})`)}
+            >
+              View All <ArrowUpRight size={13} />
+            </button>
           </div>
           <div className="md-table-scroll">
             <table className="md-table">
-              <thead><tr><th>Deliverable</th><th>Type</th><th>Status</th><th>Version</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Status</th>
+                  <th>Progress</th>
+                </tr>
+              </thead>
               <tbody>
-                {deliverables.slice(0, 5).map((item) => (
-                  <tr key={item.name}>
-                    <td>{item.name}</td>
-                    <td>{item.type}</td>
-                    <td><Status value={item.status} /></td>
-                    <td>{item.version}</td>
+                {tasksList.length > 0 ? (
+                  tasksList.slice(0, 5).map((t: any) => (
+                    <tr key={t._id || t.id}>
+                      <td>{t.title || t.name}</td>
+                      <td>
+                        <Status value={t.status || "To Do"} />
+                      </td>
+                      <td>{t.progress || 0}%</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={3} style={{ textAlign: "center", padding: "16px" }}>
+                      No tasks linked to this milestone yet.
+                    </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -202,109 +264,75 @@ export default function MilestoneDetail({
 
       <section className="md-card md-schedule-card">
         <div className="md-card-heading">
-          <h2><CalendarDays size={15} /> Schedule & Timeline</h2>
-          <button type="button" onClick={() => setActiveTab("Schedule & Progress")}>View Full Timeline <ArrowUpRight size={13} /></button>
+          <h2>
+            <CalendarDays size={15} /> Schedule &amp; Timeline
+          </h2>
+          <button
+            type="button"
+            onClick={() => setActiveTab("Schedule & Progress")}
+          >
+            View Full Timeline <ArrowUpRight size={13} />
+          </button>
         </div>
         <div className="md-timeline-layout">
           <div className="md-date-list">
-            <p><span>Planned Start</span><strong>{start}</strong></p>
-            <p><span>Actual Start</span><strong>17 May 2025</strong></p>
-            <p><span>Planned End</span><strong>{end}</strong></p>
-            <p><span>Baseline Duration</span><strong>{duration} Days</strong></p>
-            <p><span>Elapsed Duration</span><strong>2 Days</strong></p>
-            <p><span>Remaining Duration</span><strong>14 Days</strong></p>
+            <p>
+              <span>Planned Start</span>
+              <strong>{start}</strong>
+            </p>
+            <p>
+              <span>Planned End</span>
+              <strong>{end}</strong>
+            </p>
+            <p>
+              <span>Baseline Duration</span>
+              <strong>{duration} Days</strong>
+            </p>
           </div>
           <div className="md-gantt">
-            <div className="md-gantt-months"><span>May 2025</span><span>Jun 2025</span></div>
-            <div className="md-gantt-days">
-              {Array.from({ length: 14 }, (_, index) => <span key={index}>{index + 12}</span>)}
+            <div className="md-gantt-months">
+              <span>Timeline Progress</span>
             </div>
-            <div className="md-gantt-line planned"><span /></div>
-            <div className="md-gantt-line actual"><span style={{ width: `${progress}%` }} /></div>
-            <div className="md-gantt-line remaining"><span /></div>
-            <div className="md-today-line"><span>Today</span></div>
-            <div className="md-gantt-legend">
-              <span><i className="planned-dot" /> Planned</span>
-              <span><i className="actual-dot" /> Actual</span>
-              <span><i className="remaining-dot" /> Remaining</span>
-              <span><i className="today-dot" /> Today</span>
+            <div className="md-gantt-line actual">
+              <span style={{ width: `${progress}%` }} />
             </div>
           </div>
         </div>
       </section>
-
-      <div className="md-overview-grid">
-        <section className="md-card">
-          <div className="md-card-heading">
-            <h2>Dependencies</h2>
-            <button type="button" onClick={() => setActiveTab("Dependencies")}>View All</button>
-          </div>
-          <div className="md-table-scroll">
-            <table className="md-table">
-              <thead><tr><th>ID</th><th>Dependency</th><th>Type</th><th>Impact</th><th>Status</th></tr></thead>
-              <tbody>
-                {dependencies.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.id}</td><td>{item.title}</td><td>{item.type}</td>
-                    <td><Status value={item.impact} /></td><td><Status value={item.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="md-card">
-          <div className="md-card-heading">
-            <h2>Linked Tasks</h2>
-            <button type="button" onClick={() => setActiveTab("Tasks (8)")}>View All</button>
-          </div>
-          <div className="md-task-stats">
-            <div><strong>8</strong><span>Total</span></div>
-            <div><strong>3</strong><span>Completed</span></div>
-            <div><strong>4</strong><span>In Progress</span></div>
-            <div><strong>1</strong><span>To Do</span></div>
-          </div>
-          <div className="md-table-scroll">
-            <table className="md-table">
-              <thead><tr><th>Task ID</th><th>Task Title</th><th>Status</th><th>Progress</th></tr></thead>
-              <tbody>
-                {tasks.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.id}</td><td>{item.title}</td><td><Status value={item.status} /></td>
-                    <td>{item.progress}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
     </>
   );
 
   const renderSchedule = () => (
     <section className="md-card">
-      <h2>Schedule & Progress</h2>
+      <h2>Schedule &amp; Progress</h2>
       <div className="md-progress-large">
-        <div><span>Overall Milestone Progress</span><strong>{progress}%</strong></div>
-        <div className="md-progress-track"><span style={{ width: `${progress}%` }} /></div>
+        <div>
+          <span>Overall Milestone Progress</span>
+          <strong>{progress}%</strong>
+        </div>
+        <div className="md-progress-track">
+          <span style={{ width: `${progress}%` }} />
+        </div>
       </div>
       <div className="md-detail-facts">
-        <div><span>Planned Start</span><strong>{start}</strong></div>
-        <div><span>Planned End</span><strong>{end}</strong></div>
-        <div><span>Baseline Duration</span><strong>{duration} days</strong></div>
-        <div><span>Completion Type</span><strong>Manual</strong></div>
-        <div><span>Current Status</span><strong><Status value={status} /></strong></div>
-        <div><span>Forecast End</span><strong>{end}</strong></div>
-      </div>
-      <div className="md-schedule-visual">
-        <h3>Milestone Schedule</h3>
-        <div className="md-schedule-track">
-          <div className="md-schedule-baseline" />
-          <div className="md-schedule-actual" style={{ width: `${progress}%` }} />
+        <div>
+          <span>Planned Start</span>
+          <strong>{start}</strong>
         </div>
-        <div className="md-schedule-labels"><span>Planned</span><span>Actual progress</span></div>
+        <div>
+          <span>Planned End</span>
+          <strong>{end}</strong>
+        </div>
+        <div>
+          <span>Baseline Duration</span>
+          <strong>{duration} days</strong>
+        </div>
+        <div>
+          <span>Current Status</span>
+          <strong>
+            <Status value={status} />
+          </strong>
+        </div>
       </div>
     </section>
   );
@@ -312,13 +340,24 @@ export default function MilestoneDetail({
   const renderDeliverables = () => (
     <section className="md-card">
       <div className="md-card-heading">
-        <h2>Deliverables & Acceptance</h2>
-        <button type="button" onClick={() => alert("Connect deliverables API to add a deliverable.")}><Plus size={14} /> Add Deliverable</button>
+        <h2>Deliverables &amp; Acceptance</h2>
       </div>
       <div className="md-table-scroll">
         <table className="md-table">
-          <thead><tr><th>Deliverable</th><th>Type</th><th>Status</th><th>Version</th><th>Owner</th></tr></thead>
-          <tbody>{deliverables.map((item) => <tr key={item.name}><td>{item.name}</td><td>{item.type}</td><td><Status value={item.status} /></td><td>{item.version}</td><td>{owner}</td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Deliverable</th>
+              <th>Status</th>
+              <th>Owner</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={3} style={{ textAlign: "center", padding: "24px" }}>
+                No deliverables recorded for this milestone.
+              </td>
+            </tr>
+          </tbody>
         </table>
       </div>
     </section>
@@ -328,12 +367,23 @@ export default function MilestoneDetail({
     <section className="md-card">
       <div className="md-card-heading">
         <h2>Milestone Dependencies</h2>
-        <button type="button" onClick={() => alert("Connect dependency API to add dependencies.")}><Plus size={14} /> Add Dependency</button>
       </div>
       <div className="md-table-scroll">
         <table className="md-table">
-          <thead><tr><th>Dependency ID</th><th>Dependency</th><th>Relationship</th><th>Depends On</th><th>Impact</th><th>Status</th></tr></thead>
-          <tbody>{dependencies.map((item) => <tr key={item.id}><td>{item.id}</td><td>{item.title}</td><td>{item.type}</td><td>{item.dependsOn}</td><td><Status value={item.impact} /></td><td><Status value={item.status} /></td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Dependency</th>
+              <th>Impact</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={3} style={{ textAlign: "center", padding: "24px" }}>
+                No active milestone dependencies recorded.
+              </td>
+            </tr>
+          </tbody>
         </table>
       </div>
     </section>
@@ -342,13 +392,61 @@ export default function MilestoneDetail({
   const renderTasks = () => (
     <section className="md-card">
       <div className="md-card-heading">
-        <h2>Linked Tasks</h2>
-        <button type="button" onClick={() => alert("Connect task API to link a task.")}><Plus size={14} /> Link Task</button>
+        <h2>Linked Tasks ({tasksList.length})</h2>
+        <button type="button" onClick={() => setShowAddTask((v) => !v)}>
+          <Plus size={14} /> Add Task
+        </button>
       </div>
+      {showAddTask && (
+        <div style={{ display: "flex", gap: "8px", margin: "12px 0" }}>
+          <input
+            style={{
+              flex: 1,
+              padding: "6px 10px",
+              border: "1px solid #d0d5dd",
+              borderRadius: "6px",
+            }}
+            placeholder="Task title..."
+            value={newTaskTitle}
+            onChange={(e) => setNewTaskTitle(e.target.value)}
+          />
+          <button
+            type="button"
+            className="md-button"
+            onClick={handleCreateTask}
+          >
+            Create
+          </button>
+        </div>
+      )}
       <div className="md-table-scroll">
         <table className="md-table">
-          <thead><tr><th>Task ID</th><th>Task Title</th><th>Status</th><th>Progress</th><th>Owner</th></tr></thead>
-          <tbody>{tasks.map((item) => <tr key={item.id}><td>{item.id}</td><td>{item.title}</td><td><Status value={item.status} /></td><td>{item.progress}%</td><td>{owner}</td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Status</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasksList.length > 0 ? (
+              tasksList.map((t: any) => (
+                <tr key={t._id || t.id}>
+                  <td>{t.title || t.name}</td>
+                  <td>
+                    <Status value={t.status || "To Do"} />
+                  </td>
+                  <td>{t.progress || 0}%</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={3} style={{ textAlign: "center", padding: "24px" }}>
+                  No tasks linked to this milestone yet. Click &apos;Add Task&apos; to link one.
+                </td>
+              </tr>
+            )}
+          </tbody>
         </table>
       </div>
     </section>
@@ -356,66 +454,85 @@ export default function MilestoneDetail({
 
   const renderResources = () => (
     <section className="md-card">
-      <div className="md-card-heading"><h2>Resources & Allocation</h2><button type="button" onClick={() => alert("Connect resource API to assign resources.")}><Plus size={14} /> Assign Resource</button></div>
+      <div className="md-card-heading">
+        <h2>Resources &amp; Allocation</h2>
+      </div>
       <div className="md-detail-facts">
-        {stakeholders.map((person) => <div key={person.name}><span>{person.role}</span><strong>{person.name}</strong></div>)}
+        <div>
+          <span>Milestone Owner</span>
+          <strong>{owner}</strong>
+        </div>
       </div>
     </section>
   );
 
   const renderDocuments = () => (
     <section className="md-card">
-      <div className="md-card-heading"><h2>Documents & Attachments</h2><button type="button"><Paperclip size={14} /> Attach Document</button></div>
-      <div className="md-table-scroll">
-        <table className="md-table">
-          <thead><tr><th>Document Name</th><th>Type</th><th>Version</th><th>Uploaded By</th><th>Uploaded On</th><th>Action</th></tr></thead>
-          <tbody>{deliverables.slice(0, 3).map((item, index) => <tr key={item.name}><td>{item.name}</td><td>{item.type}</td><td>{item.version}</td><td>{owner}</td><td>16 May 2025</td><td><button className="md-table-action" type="button" aria-label={`Download ${item.name}`}><Download size={14} /></button></td></tr>)}</tbody>
-        </table>
+      <div className="md-card-heading">
+        <h2>Documents &amp; Attachments</h2>
       </div>
+      <p style={{ padding: "16px", color: "#667085" }}>
+        No documents attached to this milestone.
+      </p>
     </section>
   );
 
   const renderApprovals = () => (
     <section className="md-card">
       <h2>Approval Workflow</h2>
-      <div className="md-approval-list">
-        {stakeholders.map((person, index) => (
-          <div className="md-approval-row" key={person.name}>
-            <div className="md-avatar">{person.initials}</div>
-            <div><strong>{person.name}</strong><small>{person.role}</small></div>
-            <Status value={person.status} />
-            <span>Step {index + 1}</span>
-          </div>
-        ))}
-      </div>
+      <p style={{ padding: "16px", color: "#667085" }}>
+        Milestone sign-off criteria is currently pending stakeholder review.
+      </p>
     </section>
   );
 
   const renderComments = () => (
     <section className="md-card">
-      <h2>Comments & Discussion</h2>
+      <h2>Comments &amp; Discussion</h2>
       <div className="md-comment-compose">
-        <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Write a comment..." rows={3} />
-        <button type="button" onClick={addComment} disabled={!comment.trim()}>Add Comment</button>
+        <textarea
+          value={comment}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder="Write a comment..."
+          rows={3}
+        />
+        <button
+          type="button"
+          onClick={addComment}
+          disabled={!comment.trim()}
+        >
+          Add Comment
+        </button>
       </div>
-      {comments.map((item, index) => (
-        <div className="md-comment" key={`${item.name}-${index}`}>
-          <div className="md-avatar">{initials(item.name)}</div>
-          <div><strong>{item.name}</strong><p>{item.text}</p><small>Recent comment</small></div>
-        </div>
-      ))}
+      {comments.length > 0 ? (
+        comments.map((item, index) => (
+          <div className="md-comment" key={`${item.name}-${index}`}>
+            <div className="md-avatar">{initials(item.name)}</div>
+            <div>
+              <strong>{item.name}</strong>
+              <p>{item.text}</p>
+              <small>Just now</small>
+            </div>
+          </div>
+        ))
+      ) : (
+        <p style={{ padding: "12px", color: "#667085" }}>
+          No comments yet. Post the first comment above.
+        </p>
+      )}
     </section>
   );
 
   const renderHistory = () => (
     <section className="md-card">
       <h2>Milestone History</h2>
-      {activities.map((item) => (
-        <div className="md-history-row" key={item.date}>
-          <History size={15} />
-          <div><strong>{item.text}</strong><small>{item.date}</small></div>
+      <div className="md-history-row">
+        <History size={15} />
+        <div>
+          <strong>Milestone created</strong>
+          <small>{milestone.createdAt ? milestone.createdAt.slice(0, 10) : start}</small>
         </div>
-      ))}
+      </div>
     </section>
   );
 
@@ -436,31 +553,67 @@ export default function MilestoneDetail({
     <section className="milestone-detail-page">
       <div className="md-header-actions">
         <div>
-          <div className="md-breadcrumb">Milestone Management <span>›</span> <Link href="/milestones">Milestone Registry</Link> <span>›</span> {milestone.id} — Milestone Detail</div>
-          <h1>{milestone.id} — {title}</h1>
-          <p>Project: <strong>{projectId} - AI-CMS Platform</strong><span>Module: <strong>Requirements Management</strong></span></p>
+          <div className="md-breadcrumb">
+            Milestone Management <span>›</span>{" "}
+            <Link href="/milestones">Milestone Registry</Link> <span>›</span>{" "}
+            {milestone._id || milestone.id} — Milestone Detail
+          </div>
+          <h1>
+            {milestone.name || title}
+          </h1>
+          <p>
+            Project: <strong>{projectId}</strong>
+          </p>
         </div>
         <div className="md-header-buttons">
-          <Link href={`/milestones/${encodeURIComponent(milestone.id)}/edit`} className="md-button"><Edit3 size={14} /> Edit Milestone</Link>
-          <button className="md-button" type="button"><MoreHorizontal size={15} /> More Actions <ArrowDown size={12} /></button>
-          <button className="md-button" type="button"><Download size={14} /> Export</button>
+          <Link
+            href={`/milestones/${encodeURIComponent(milestone._id || milestone.id)}/edit`}
+            className="md-button"
+          >
+            <Edit3 size={14} /> Edit Milestone
+          </Link>
         </div>
       </div>
 
       <section className="md-hero">
         <div className="md-hero-facts">
-          <div><span>Milestone ID</span><strong>{milestone.id}</strong></div>
-          <div><span>Milestone Type</span><strong>{type}</strong></div>
-          <div><span>Status</span><strong><Status value={status} /></strong></div>
-          <div><span>Priority</span><strong><Status value={priority} /></strong></div>
-          <div><span>Planned Start</span><strong>{start}</strong></div>
-          <div><span>Planned End</span><strong>{end}</strong></div>
-          <div><span>Owner</span><strong>{owner}</strong></div>
-          <div><span>Approval Status</span><strong><Status value="In Review" /></strong></div>
+          <div>
+            <span>Milestone Type</span>
+            <strong>{type}</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>
+              <Status value={status} />
+            </strong>
+          </div>
+          <div>
+            <span>Priority</span>
+            <strong>
+              <Status value={priority} />
+            </strong>
+          </div>
+          <div>
+            <span>Planned Start</span>
+            <strong>{start}</strong>
+          </div>
+          <div>
+            <span>Planned End</span>
+            <strong>{end}</strong>
+          </div>
+          <div>
+            <span>Owner</span>
+            <strong>{owner}</strong>
+          </div>
         </div>
         <div className="md-hero-progress">
-          <div><span>Progress</span><strong>{progress}%</strong></div>
-          <div className="md-progress-track"><span style={{ width: `${progress}%` }} /></div>
+          <div>
+            <span>Progress</span>
+            <strong>{progress}%</strong>
+          </div>
+          <div className="md-progress-track">
+            <span style={{ width: `${progress}%` }} />
+          </div>
         </div>
       </section>
 
@@ -480,64 +633,6 @@ export default function MilestoneDetail({
           </nav>
           {tabContent()}
         </main>
-
-        <aside className="md-sidebar">
-          <section className="md-card">
-            <h2>Milestone Summary</h2>
-            <p className="md-summary-description">This milestone represents the completion of the required project deliverables and stakeholder approvals.</p>
-            <dl className="md-summary-list">
-              <div><dt>Project</dt><dd>{projectId} - AI-CMS Platform</dd></div>
-              <div><dt>Module</dt><dd>Requirements Management</dd></div>
-              <div><dt>Milestone Type</dt><dd>{type} Milestone</dd></div>
-              <div><dt>Priority</dt><dd><Status value={priority} /></dd></div>
-              <div><dt>Status</dt><dd><Status value={status} /></dd></div>
-              <div><dt>Progress</dt><dd>{progress}%</dd></div>
-              <div><dt>Planned Start</dt><dd>{start}</dd></div>
-              <div><dt>Planned End</dt><dd>{end}</dd></div>
-              <div><dt>Owner</dt><dd>{owner}</dd></div>
-              <div><dt>Approval Status</dt><dd><Status value="In Review" /></dd></div>
-            </dl>
-          </section>
-
-          <section className="md-card">
-            <h2>Approval Workflow</h2>
-            <div className="md-workflow">
-              {[
-                ["Submitted", "18 May 2025, 10:15 AM by Pooja Singh", "done"],
-                ["In Review", "Currently with stakeholders for review", "active"],
-                ["Approved", "Pending final approval", ""],
-                ["Released", "To be marked as released", ""],
-              ].map(([name, detail, state]) => (
-                <div className={`md-workflow-step ${state}`} key={name}>
-                  <span>{state === "done" ? <CheckCircle2 size={15} /> : <Circle size={15} />}</span>
-                  <div><strong>{name}</strong><small>{detail}</small></div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="md-card">
-            <div className="md-card-heading"><h2>Stakeholders</h2><button type="button" onClick={() => setActiveTab("Resources (4)")}>View All</button></div>
-            {stakeholders.map((person) => (
-              <div className="md-person-row" key={person.name}>
-                <div className="md-avatar">{person.initials}</div>
-                <div><strong>{person.name}</strong><small>{person.role}</small></div>
-                <Status value={person.status} />
-              </div>
-            ))}
-            <strong className="md-total-stakeholders">Total Stakeholders: 4</strong>
-          </section>
-
-          <section className="md-card">
-            <div className="md-card-heading"><h2>Milestone Activity</h2><button type="button" onClick={() => setShowAllActivity((value) => !value)}>{showAllActivity ? "Show Less" : "View All"}</button></div>
-            {activities.slice(0, showAllActivity ? activities.length : 3).map((item) => (
-              <div className="md-activity-row" key={item.date}>
-                <div className="md-activity-dot" />
-                <div><strong>{item.date}</strong><p>{item.text}</p></div>
-              </div>
-            ))}
-          </section>
-        </aside>
       </div>
     </section>
   );

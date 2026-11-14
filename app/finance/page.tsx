@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Shell } from "../../components/Shell";
 import { StatusBadge } from "../../components/StatusBadge";
+import { getProjectsWithFinancials } from "@/lib/api";
 import {
   WalletCards,
   CircleDollarSign,
@@ -12,6 +13,7 @@ import {
   Receipt,
   FileCheck,
   Building,
+  RefreshCw,
 } from "lucide-react";
 
 type ProjectFinancialSummary = {
@@ -29,65 +31,69 @@ type ProjectFinancialSummary = {
   received: number;
   outstanding: number;
   costingMode: "Mode A (Full)" | "Mode B (Direct)" | "Mode C (Internal)";
+  isLive?: boolean;
 };
-
-const financialData: ProjectFinancialSummary[] = [
-  {
-    id: "FIN-1",
-    code: "PHT-2026-AICMS-001",
-    name: "AI-CMS Implementation",
-    client: "Apollo Hospitals",
-    contractValue: 4800000,
-    crValue: 450000,
-    netRevenue: 5250000,
-    directCost: 3420000,
-    contributionMargin: 1830000,
-    marginPercent: 34.8,
-    invoiced: 2850000,
-    received: 2200000,
-    outstanding: 650000,
-    costingMode: "Mode A (Full)",
-  },
-  {
-    id: "FIN-2",
-    code: "PHT-2026-WEB-002",
-    name: "Pehal Patient Telehealth Portal",
-    client: "Healthcare Global Network",
-    contractValue: 2400000,
-    crValue: 0,
-    netRevenue: 2400000,
-    directCost: 1680000,
-    contributionMargin: 720000,
-    marginPercent: 30.0,
-    invoiced: 1600000,
-    received: 1200000,
-    outstanding: 400000,
-    costingMode: "Mode A (Full)",
-  },
-  {
-    id: "FIN-3",
-    code: "PHT-2026-RND-004",
-    name: "Internal AI Diagnostics POC",
-    client: "PehalHealthcare Internal",
-    contractValue: 0,
-    crValue: 0,
-    netRevenue: 0,
-    directCost: 850000,
-    contributionMargin: -850000,
-    marginPercent: 0,
-    invoiced: 0,
-    received: 0,
-    outstanding: 0,
-    costingMode: "Mode C (Internal)",
-  },
-];
 
 function formatINR(val: number) {
   return "₹ " + val.toLocaleString("en-IN");
 }
 
 export default function FinancePage() {
-  const [data] = useState<ProjectFinancialSummary[]>(financialData);
+  const [data, setData] = useState<ProjectFinancialSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+
+  const fetchFinanceData = async () => {
+    setLoading(true);
+    try {
+      const res = await getProjectsWithFinancials();
+      if (res && res.items && res.items.length > 0) {
+        const mapped: ProjectFinancialSummary[] = res.items.map((p: any) => {
+          const contract = Number(p.contractValue || p.budget || 0);
+          const cr = Number(p.crValue || 0);
+          const net = contract + cr;
+          const cost = Number(p.directCost || p.actualCost || p.spent || 0);
+          const margin = net - cost;
+          const marginPct = net > 0 ? Number(((margin / net) * 100).toFixed(1)) : 0;
+          const inv = Number(p.invoicedAmount || p.invoiced || 0);
+          const rec = Number(p.receivedAmount || p.received || 0);
+          const out = inv - rec;
+
+          return {
+            id: p._id || p.id,
+            code: p.projectCode || p.code || `PHT-PRJ-${(p._id || "0000").slice(-4).toUpperCase()}`,
+            name: p.projectName || p.name || "Project",
+            client: p.clientId?.displayName || p.clientId?.legalName || p.clientName || "Client",
+            contractValue: contract,
+            crValue: cr,
+            netRevenue: net,
+            directCost: cost,
+            contributionMargin: margin,
+            marginPercent: marginPct,
+            invoiced: inv,
+            received: rec,
+            outstanding: out,
+            costingMode: p.billingType === "INTERNAL" ? "Mode C (Internal)" : "Mode A (Full)",
+            isLive: true,
+          };
+        });
+        setData(mapped);
+        setIsLiveConnected(true);
+      } else {
+        setData([]);
+        setIsLiveConnected(true);
+      }
+    } catch {
+      setData([]);
+      setIsLiveConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFinanceData();
+  }, []);
 
   const totalContract = data.reduce((sum, d) => sum + d.contractValue, 0);
   const totalNetRevenue = data.reduce((sum, d) => sum + d.netRevenue, 0);
@@ -104,6 +110,22 @@ export default function FinancePage() {
             <div className="eyebrow">COMMERCIAL & COSTING CONTROL</div>
             <h1>Financial Architecture & Contribution Margin</h1>
             <p>Delivery cost accounting, contractual revenues, approved CR value, contribution margin, and receivables management.</p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "0.8rem", color: isLiveConnected ? "#059669" : "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: isLiveConnected ? "#059669" : "#94a3b8" }} />
+              {isLiveConnected ? "Live API Connected" : "Local / Seed View"}
+            </span>
+            <button
+              type="button"
+              className="btn outline"
+              onClick={fetchFinanceData}
+              disabled={loading}
+              title="Sync financials from backend"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} style={{ marginRight: "4px" }} />
+              {loading ? "Syncing..." : "Sync API"}
+            </button>
           </div>
         </div>
 
@@ -178,8 +200,22 @@ export default function FinancePage() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((proj) => (
-                  <tr key={proj.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
+                {loading && data.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
+                      <RefreshCw size={28} className="animate-spin" style={{ margin: "0 auto 8px" }} />
+                      <div>Loading live commercial project financials from API...</div>
+                    </td>
+                  </tr>
+                ) : data.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
+                      <div>No commercial project data found from API.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  data.map((proj) => (
+                    <tr key={proj.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
                     <td style={{ padding: "12px" }}>
                       <span style={{ fontSize: "0.75rem", color: "#2563eb", fontWeight: "bold" }}>{proj.code}</span>
                       <div style={{ fontWeight: "600", color: "#0f172a" }}>{proj.name}</div>
@@ -221,7 +257,7 @@ export default function FinancePage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
