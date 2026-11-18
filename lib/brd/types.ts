@@ -15,8 +15,11 @@ export type BrdType =
 
 export interface BrdRecord {
   id: string;
+  code?: string;
+  brdCode?: string;
   title: string;
   projectId: string;
+  projectCode?: string;
   projectName: string;
   clientName: string;
   type: BrdType;
@@ -146,6 +149,19 @@ export interface BrdCreateInput {
   tags: string[];
   targetReleaseDate?: string;
   reviewDueDate?: string;
+
+  projectCode?: string;
+  projectName?: string;
+  brdCode?: string;
+  brdType?: string;
+  status?: BrdStatus | string;
+  version?: string;
+  businessObjectives?: string;
+  requirementsSummary?: string;
+  scope?: { inScope: string[]; outOfScope: string[] } | any;
+  deliverables?: any[];
+  stakeholders?: any[];
+  attachments?: any[];
 }
 
 export type BrdUpdateInput = Partial<BrdCreateInput>;

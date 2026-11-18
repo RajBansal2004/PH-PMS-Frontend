@@ -259,13 +259,17 @@ const normalizeApiResponse = (response: any): ApiResult => {
       ? root.data
       : root;
 
-  const items = Array.isArray(payload?.data)
+  const items = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
     ? payload.data
     : Array.isArray(payload?.items)
       ? payload.items
       : Array.isArray(payload?.results)
         ? payload.results
-        : [];
+        : Array.isArray(root)
+          ? root
+          : [];
 
   const pagination =
     root?.pagination ||

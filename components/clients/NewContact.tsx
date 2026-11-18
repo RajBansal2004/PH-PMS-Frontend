@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -15,6 +15,7 @@ import {
   X,
   Download,
 } from "lucide-react";
+import { clients as getClientsApi, createClientContact as apiCreateClientContact } from "@/lib/api";
 
 import "./new-contact.css";
 
@@ -91,12 +92,30 @@ const departments = [
 
 export default function NewContact() {
   const [form, setForm] = useState<ContactForm>(initialForm);
+  const [clients, setClients] = useState<any[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState("");
   const [currentStep, setCurrentStep] = useState(1);
   const [photo, setPhoto] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    async function fetchClients() {
+      try {
+        const res = await getClientsApi();
+        const list = Array.isArray(res) ? res : res?.items || res?.data || [];
+        setClients(list);
+        if (list.length > 0) {
+          setSelectedClientId(list[0]._id || list[0].id);
+        }
+      } catch (err) {
+        console.warn("Error fetching clients in NewContact:", err);
+      }
+    }
+    fetchClients();
+  }, []);
 
   function update<K extends keyof ContactForm>(
     key: K,
@@ -211,9 +230,15 @@ export default function NewContact() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveContact() {
+  async function saveContact() {
     if (!form.firstName.trim() || !form.lastName.trim()) {
       setError("Please complete the required contact information.");
+      setCurrentStep(1);
+      return;
+    }
+
+    if (!selectedClientId) {
+      setError("Please select a client for this contact.");
       setCurrentStep(1);
       return;
     }
@@ -228,27 +253,24 @@ export default function NewContact() {
     setError("");
 
     try {
-      const existing = JSON.parse(
-        localStorage.getItem("pms-client-contacts") || "[]"
-      );
-
-      const contact = {
-        ...form,
-        photo,
-        id: `CNT-${String(existing.length + 1).padStart(3, "0")}`,
-        clientCode: "CLT-004",
-        status: "Active",
-        createdAt: new Date().toISOString(),
+      const payload = {
+        clientId: selectedClientId,
+        name: `${form.firstName.trim()} ${form.lastName.trim()}`,
+        designation: form.designation || "Point of Contact",
+        department: form.department || "Operations",
+        email: form.email.trim(),
+        phone: form.mobile || form.officePhone || null,
+        whatsapp: form.officePhone || form.mobile || null,
+        location: form.location || form.address || null,
+        isPrimary: Boolean(form.primary),
+        status: "ACTIVE",
+        notes: form.bio || null,
       };
 
-      localStorage.setItem(
-        "pms-client-contacts",
-        JSON.stringify([...existing, contact])
-      );
-
+      await apiCreateClientContact(payload);
       setSaved(true);
-    } catch {
-      setError("Unable to save contact. Please try again.");
+    } catch (err: any) {
+      setError(err?.message || "Unable to save contact to real database. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -399,6 +421,23 @@ export default function NewContact() {
             <PanelTitle number="1" title="Basic Information" />
 
             <div className="nc-basic-grid">
+              <Field label="Associated Client *" wide>
+                <select
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(e.target.value)}
+                >
+                  {clients.length === 0 ? (
+                    <option value="">No clients available (Create a client first)</option>
+                  ) : (
+                    clients.map((c) => (
+                      <option key={c._id || c.id} value={c._id || c.id}>
+                        {c.displayName || c.legalName || c.name} ({c.clientCode || "CLT"})
+                      </option>
+                    ))
+                  )}
+                </select>
+              </Field>
+
               <Field label="First Name *">
                 <input
                   value={form.firstName}

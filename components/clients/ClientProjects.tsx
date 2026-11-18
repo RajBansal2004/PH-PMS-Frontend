@@ -167,6 +167,7 @@ export default function ClientProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [clientInfo, setClientInfo] = useState<any>(null);
+  const [clientList, setClientList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState("Overview");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All Status");
@@ -202,11 +203,12 @@ export default function ClientProjects() {
         const cList = Array.isArray(cltRes.value)
           ? cltRes.value
           : (cltRes.value as any)?.items || [];
+        setClientList(cList);
         if (cList.length > 0) {
-          setClientInfo(cList[0]);
+          setClientInfo((prev: any) => prev || cList[0]);
           setProjectForm((prev) => ({
             ...prev,
-            client: cList[0].name || "",
+            client: cList[0].displayName || cList[0].name || "",
           }));
         }
       }
@@ -229,18 +231,18 @@ export default function ClientProjects() {
 
           return {
             id: p._id,
-            code: p.code || "PRJ",
-            name: p.name || "Untitled Project",
-            type: p.type || "Implementation",
-            manager: p.manager?.name || "Unassigned",
+            code: p.projectCode || p.code || "PRJ",
+            name: p.projectName || p.name || "Untitled Project",
+            type: p.projectCategory || p.type || "Implementation",
+            manager: p.projectManagerId?.displayName || p.projectManagerId?.name || p.manager?.name || "Unassigned",
             status: st,
             priority: pr,
             progress: p.progress || 0,
             start: p.startDate ? p.startDate.slice(0, 10) : "—",
-            end: p.endDate ? p.endDate.slice(0, 10) : "—",
-            revenue: p.budget
-              ? `₹ ${Number(p.budget).toLocaleString("en-IN")}`
-              : "₹ 0",
+            end: p.targetCompletion ? p.targetCompletion.slice(0, 10) : (p.endDate ? p.endDate.slice(0, 10) : "—"),
+            revenue: p.contractValue
+              ? `₹ ${Number(p.contractValue).toLocaleString("en-IN")}`
+              : (p.budget ? `₹ ${Number(p.budget).toLocaleString("en-IN")}` : "₹ 0"),
           };
         });
         setProjects(mapped);
@@ -354,7 +356,36 @@ export default function ClientProjects() {
             <small>Manage and monitor all projects associated with this client</small>
           </div>
         </div>
-        <div className="cp-header-actions">
+        <div className="cp-header-actions" style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          {clientList.length > 0 && (
+            <select
+              value={clientInfo?._id || clientInfo?.id || ""}
+              onChange={(e) => {
+                const found = clientList.find((c) => (c._id || c.id) === e.target.value);
+                if (found) {
+                  setClientInfo(found);
+                  setProjectForm((prev) => ({ ...prev, client: found.displayName || found.name }));
+                }
+              }}
+              style={{
+                padding: "8px 14px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                fontSize: "13px",
+                background: "#ffffff",
+                color: "#0f172a",
+                fontWeight: 600,
+                outline: "none",
+                cursor: "pointer",
+              }}
+            >
+              {clientList.map((c) => (
+                <option key={c._id || c.id} value={c._id || c.id}>
+                  {c.displayName || c.legalName || c.name} ({c.clientCode || "CLT"})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             className="cp-btn primary"
             onClick={() =>
@@ -369,7 +400,13 @@ export default function ClientProjects() {
       </div>
 
       <div className="cp-client-card">
-        <div className="cp-client-logo">✚</div>
+        <div className="cp-client-logo">
+          {clientInfo?.logo ? (
+            <img src={clientInfo.logo} alt="Client Logo" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 8 }} />
+          ) : (
+            <Building2 size={20} />
+          )}
+        </div>
         <div className="cp-client-info">
           <h2>
             {clientInfo?.name || "Client"}{" "}

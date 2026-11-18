@@ -30,10 +30,20 @@ import {
 
 import "./client-contacts.css";
 import { useRouter } from "next/navigation";
-import { clients as getClients } from "@/lib/api";
+import {
+    clients as getClients,
+    getClientContacts,
+    createClientContact,
+    updateClientContact,
+    deleteClientContact,
+    setPrimaryClientContact,
+} from "@/lib/api";
 
 type Contact = {
-    id: number;
+    id: string;
+    backendId?: string;
+    clientId?: string;
+    clientName?: string;
     name: string;
     designation: string;
     department: string;
@@ -133,7 +143,9 @@ function Info({
 
 export default function ClientContacts() {
     const [contacts, setContacts] = useState<Contact[]>([]);
-    const [selectedId, setSelectedId] = useState<number | null>(null);
+    const [clientList, setClientList] = useState<any[]>([]);
+    const [selectedClientId, setSelectedClientId] = useState<string>("");
+    const [selectedId, setSelectedId] = useState<string | null>(null);
     const router = useRouter();
     const [query, setQuery] = useState("");
     const [department, setDepartment] = useState("All Departments");
@@ -151,62 +163,91 @@ export default function ClientContacts() {
     const [showMoreFilters, setShowMoreFilters] = useState(false);
     const [showWizard, setShowWizard] = useState(false);
     const [wizardStep, setWizardStep] = useState(1);
-    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
 
     const [form, setForm] = useState<ContactForm>(emptyForm);
 
-    useEffect(() => {
-        async function loadContacts() {
-            try {
-                const res = await getClients();
-                const clientList = Array.isArray(res) ? res : res?.items || [];
-                const extracted: Contact[] = [];
-                let counter = 1;
-                clientList.forEach((cl: any) => {
-                    if (cl.contacts && Array.isArray(cl.contacts) && cl.contacts.length > 0) {
-                        cl.contacts.forEach((ct: any) => {
-                            const name = ct.name || `${ct.firstName || ""} ${ct.lastName || ""}`.trim() || "Contact";
-                            extracted.push({
-                                id: counter++,
-                                name,
-                                designation: ct.designation || ct.role || "Point of Contact",
-                                department: ct.department || "Operations",
-                                email: ct.email || cl.email || "—",
-                                phone: ct.phone || cl.phone || "—",
-                                location: cl.address?.city || cl.city || "India",
-                                primary: Boolean(ct.isPrimary || ct.primary),
-                                status: "Active",
-                                added: ct.createdAt ? ct.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
-                                initials: name.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase(),
-                            });
-                        });
-                    } else if (cl.primaryContact || cl.contactPerson || cl.email) {
-                        const name = cl.primaryContact?.name || cl.contactPerson || cl.name;
+    const loadContacts = async () => {
+        try {
+            const [cRes, contactsRes] = await Promise.allSettled([
+                getClients(),
+                getClientContacts({ clientId: selectedClientId || undefined }),
+            ]);
+
+            let clientsData: any[] = [];
+            if (cRes.status === "fulfilled" && cRes.value) {
+                clientsData = Array.isArray(cRes.value) ? cRes.value : (cRes.value as any)?.items || [];
+                setClientList(clientsData);
+                if (!selectedClientId && clientsData.length > 0) {
+                    setSelectedClientId(clientsData[0]._id || clientsData[0].id);
+                }
+            }
+
+            const extracted: Contact[] = [];
+            if (contactsRes.status === "fulfilled" && contactsRes.value) {
+                const list = Array.isArray(contactsRes.value)
+                    ? contactsRes.value
+                    : (contactsRes.value as any)?.items || [];
+
+                list.forEach((ct: any) => {
+                    const name = ct.name || "Contact Person";
+                    extracted.push({
+                        id: String(ct._id || ct.id),
+                        backendId: String(ct._id || ct.id),
+                        clientId: String(ct.clientId?._id || ct.clientId || ""),
+                        clientName: ct.clientId?.displayName || ct.clientId?.legalName || "Client",
+                        name,
+                        designation: ct.designation || "Point of Contact",
+                        department: ct.department || "Operations",
+                        email: ct.email || "—",
+                        phone: ct.phone || ct.whatsapp || "—",
+                        location: ct.location || "India",
+                        primary: Boolean(ct.isPrimary),
+                        status: ct.status === "ACTIVE" ? "Active" : "Inactive",
+                        added: ct.createdAt ? new Date(ct.createdAt).toLocaleDateString("en-GB") : "—",
+                        initials: name.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase(),
+                    });
+                });
+            }
+
+            // Fallback if no separate contacts in DB yet
+            if (extracted.length === 0 && clientsData.length > 0) {
+                clientsData.forEach((cl: any) => {
+                    if (cl.primaryContactId || cl.email) {
+                        const pc = cl.primaryContactId || {};
+                        const name = pc.name || cl.displayName || cl.legalName || "Primary Contact";
                         extracted.push({
-                            id: counter++,
+                            id: String(cl._id || cl.id),
+                            backendId: pc._id ? String(pc._id) : undefined,
+                            clientId: String(cl._id || cl.id),
+                            clientName: cl.displayName || cl.legalName,
                             name,
-                            designation: cl.primaryContact?.designation || "Primary Contact",
+                            designation: pc.designation || "Primary Contact",
                             department: "Management",
-                            email: cl.primaryContact?.email || cl.email || "—",
-                            phone: cl.primaryContact?.phone || cl.phone || "—",
-                            location: cl.address?.city || "India",
+                            email: pc.email || cl.email || "—",
+                            phone: pc.phone || cl.phone || "—",
+                            location: cl.billingAddress?.city || "India",
                             primary: true,
                             status: "Active",
-                            added: cl.createdAt ? cl.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                            added: cl.createdAt ? new Date(cl.createdAt).toLocaleDateString("en-GB") : "—",
                             initials: name.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join("").toUpperCase(),
                         });
                     }
                 });
-                setContacts(extracted);
-                if (extracted.length > 0) {
-                    setSelectedId(extracted[0].id);
-                }
-            } catch (err) {
-                console.warn("Failed to load client contacts:", err);
             }
+
+            setContacts(extracted);
+            if (extracted.length > 0) {
+                setSelectedId(extracted[0].id);
+            }
+        } catch (err) {
+            console.warn("Failed to load client contacts:", err);
         }
+    };
+
+    useEffect(() => {
         loadContacts();
-    }, []);
+    }, [selectedClientId]);
 
     const selected = contacts.find((c) => c.id === selectedId);
 
@@ -318,16 +359,22 @@ export default function ClientContacts() {
         setShowWizard(true);
     }
 
-    function togglePrimary(id: number) {
-        setContacts((old) =>
-            old.map((c) => ({
-                ...c,
-                primary: c.id === id ? !c.primary : false,
-            }))
-        );
+    async function togglePrimary(id: string) {
+        try {
+            await setPrimaryClientContact(id);
+            setContacts((old) =>
+                old.map((c) => ({
+                    ...c,
+                    primary: c.id === id ? true : false,
+                }))
+            );
+            notify("Primary contact updated in database.");
+        } catch (err: any) {
+            notify(err?.message || "Failed to update primary contact");
+        }
     }
 
-    function saveContact() {
+    async function saveContact() {
         if (
             !form.first.trim() ||
             !form.last.trim() ||
@@ -340,61 +387,39 @@ export default function ClientContacts() {
 
         const name = `${form.first.trim()} ${form.last.trim()}`;
 
-        if (editingId !== null) {
-            setContacts((old) =>
-                old.map((c) => {
-                    if (c.id !== editingId) {
-                        return {
-                            ...c,
-                            primary: form.primary ? false : c.primary,
-                        };
-                    }
-
-                    return {
-                        ...c,
-                        name,
-                        designation: form.designation || "Team Member",
-                        department: form.department,
-                        email: form.email,
-                        phone: form.phone || "—",
-                        location: form.location.split(",")[0],
-                        primary: form.primary,
-                        initials: `${form.first[0]}${form.last[0]}`.toUpperCase(),
-                    };
-                })
-            );
-
-            setSelectedId(editingId);
-            notify("Contact updated successfully.");
-        } else {
-            const next: Contact = {
-                id: Date.now(),
-                name,
-                designation: form.designation || "Team Member",
-                department: form.department,
-                email: form.email,
-                phone: form.phone || "—",
-                location: form.location.split(",")[0],
-                primary: form.primary,
-                status: "Active",
-                added: new Date().toLocaleDateString("en-GB", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                }),
-                initials: `${form.first[0]}${form.last[0]}`.toUpperCase(),
-            };
-
-            setContacts((old) => [
-                ...old.map((c) => ({
-                    ...c,
-                    primary: form.primary ? false : c.primary,
-                })),
-                next,
-            ]);
-
-            setSelectedId(next.id);
-            notify("Contact created successfully.");
+        try {
+            if (editingId !== null) {
+                await updateClientContact(editingId, {
+                    name,
+                    designation: form.designation || "Team Member",
+                    department: form.department,
+                    email: form.email,
+                    phone: form.phone || form.office || "—",
+                    location: form.location,
+                    isPrimary: form.primary,
+                });
+                notify("Contact updated successfully in database.");
+            } else {
+                if (!selectedClientId) {
+                    notify("Please choose a client for this contact.");
+                    return;
+                }
+                await createClientContact({
+                    clientId: selectedClientId,
+                    name,
+                    designation: form.designation || "Team Member",
+                    department: form.department,
+                    email: form.email,
+                    phone: form.phone || form.office || "—",
+                    location: form.location,
+                    isPrimary: form.primary,
+                    status: "ACTIVE",
+                });
+                notify("Contact created successfully in database.");
+            }
+            await loadContacts();
+        } catch (err: any) {
+            notify(err?.message || "Error saving contact to API.");
         }
 
         setShowWizard(false);
@@ -402,35 +427,46 @@ export default function ClientContacts() {
         setEditingId(null);
     }
 
-    function deleteContact() {
+    async function deleteContact() {
         if (!selected) return;
 
         if (!window.confirm(`Delete ${selected.name}?`)) return;
 
-        const remaining = contacts.filter(
-            (c) => c.id !== selected.id
-        );
-
-        setContacts(remaining);
-        setSelectedId(remaining[0]?.id ?? null);
-
-        notify("Contact deleted successfully.");
+        try {
+            if (selected.backendId) {
+                await deleteClientContact(selected.backendId);
+            }
+            const remaining = contacts.filter((c) => c.id !== selected.id);
+            setContacts(remaining);
+            setSelectedId(remaining[0]?.id ?? null);
+            notify("Contact deleted successfully from database.");
+        } catch (err: any) {
+            notify(err?.message || "Error deleting contact.");
+        }
     }
 
-    function toggleSelectedStatus() {
+    async function toggleSelectedStatus() {
         if (!selected) return;
 
-        setContacts((old) =>
-            old.map((c) =>
-                c.id === selected.id
-                    ? {
-                        ...c,
-                        status:
-                            c.status === "Active" ? "Inactive" : "Active",
-                    }
-                    : c
-            )
-        );
+        const nextStatus = selected.status === "Active" ? "INACTIVE" : "ACTIVE";
+        try {
+            if (selected.backendId) {
+                await updateClientContact(selected.backendId, { status: nextStatus });
+            }
+            setContacts((old) =>
+                old.map((c) =>
+                    c.id === selected.id
+                        ? {
+                            ...c,
+                            status: nextStatus === "ACTIVE" ? "Active" : "Inactive",
+                        }
+                        : c
+                )
+            );
+            notify(`Contact status updated to ${nextStatus}.`);
+        } catch (err: any) {
+            notify(err?.message || "Failed to update contact status.");
+        }
     }
 
     function resetFilters() {

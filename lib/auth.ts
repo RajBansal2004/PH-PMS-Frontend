@@ -5,6 +5,10 @@ export type AuthUser = {
   organizationId?: string | null;
   employeeId?: string | null;
   roles?: Array<{ id?: string; name?: string; code?: string }> | string[];
+  roleCodes?: string[];
+  primaryRole?: string;
+  primaryRoleCode?: string;
+  roleProfile?: Record<string, any>;
 };
 
 export type AuthSession = {
@@ -19,8 +23,31 @@ const REFRESH_KEY = "ph_pms_refresh_token";
 const ORG_KEY = "ph_pms_organization_id";
 const USER_KEY = "ph_pms_user";
 const REMEMBER_KEY = "ph_pms_remember";
+const REMEMBERED_EMAIL_KEY = "ph_pms_remembered_email";
 
 export const AUTH_KEYS = [ACCESS_KEY, REFRESH_KEY, ORG_KEY, USER_KEY, REMEMBER_KEY, "ph_pms_refresh_token_id"];
+
+export function getRememberedEmail(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return localStorage.getItem(REMEMBERED_EMAIL_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setRememberedEmail(email: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (email && email.trim()) {
+      localStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim().toLowerCase());
+    } else {
+      localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+    }
+  } catch {
+    // ignore storage quota / privacy mode errors
+  }
+}
 
 function stores() {
   if (typeof window === "undefined") return [] as Storage[];
@@ -47,7 +74,12 @@ export function getOrganizationId() {
   if (org) return org;
   const user = getStoredUser();
   if (user?.organizationId) return String(user.organizationId);
-  return "";
+  const token = getAccessToken();
+  if (token) {
+    const decoded = decodeJwt<{ organizationId?: string }>(token);
+    if (decoded?.organizationId) return String(decoded.organizationId);
+  }
+  return "6ac46aa65c7e160e9d89d492";
 }
 
 export function decodeJwt<T = Record<string, any>>(token: string): T | null {

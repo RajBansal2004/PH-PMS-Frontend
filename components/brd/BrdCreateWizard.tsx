@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -29,6 +30,7 @@ import {
 
 import { brdApi } from "../../lib/brd/api";
 import type { BrdCreateInput } from "../../lib/brd/types";
+import { projects as getProjects } from "../../lib/api";
 import "./brd-create-wizard.css";
 
 const STEPS = [
@@ -80,8 +82,8 @@ type FormState = {
 
 const initialState: FormState = {
   title: "",
-  code: "BRD-25-001",
-  projectCode: "PRJ-001",
+  code: "BRD-00005",
+  projectCode: "",
   projectName: "",
   client: "",
   brdType: "Business",
@@ -176,9 +178,9 @@ function Select({
 }) {
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
+      {options.map((option, idx) => (
+        <option key={typeof option === "string" ? `${option}-${idx}` : idx} value={typeof option === "string" ? option : String(option)}>
+          {typeof option === "string" ? option : String(option)}
         </option>
       ))}
     </select>
@@ -224,6 +226,67 @@ export default function BrdCreateWizard() {
   const [showDeliverableForm, setShowDeliverableForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
+  const [totalBrdsCount, setTotalBrdsCount] = useState<number>(4);
+  const [projectOptions, setProjectOptions] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      brdApi.getNextCode().catch(() => null),
+      getProjects({ limit: 100 }).catch(() => null),
+    ]).then(([nextRes, projRes]) => {
+      if (!mounted) return;
+      if (nextRes?.nextCode) {
+        setTotalBrdsCount(Number(nextRes.totalBrds) || 4);
+        setForm((prev) => ({
+          ...prev,
+          code: prev.code && prev.code !== "BRD-25-001" ? prev.code : nextRes.nextCode,
+        }));
+      }
+
+      const pItems: any[] = (projRes as any)?.items || (Array.isArray(projRes) ? projRes : []);
+      setProjectOptions(pItems);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  function handleProjectSelect(code: string) {
+    const proj = projectOptions.find(
+      (p) => String(p.projectCode || "").toUpperCase() === code.toUpperCase()
+    );
+    if (proj) {
+      const clientName =
+        proj.clientId?.displayName ||
+        proj.clientId?.companyName ||
+        proj.clientId?.legalName ||
+        proj.clientName ||
+        "Pehal Healthcare";
+      setSelectedProjectId(proj._id || proj.id || "");
+      setForm((prev) => ({
+        ...prev,
+        projectCode: proj.projectCode || code,
+        projectName: proj.projectName || "",
+        client: clientName,
+      }));
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.projectCode;
+        delete next.projectName;
+        delete next.client;
+        return next;
+      });
+    } else {
+      setSelectedProjectId("");
+      setForm((prev) => ({
+        ...prev,
+        projectCode: code,
+      }));
+    }
+  }
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -308,8 +371,8 @@ export default function BrdCreateWizard() {
     );
   }
 
-  function addStakeholder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function addStakeholder(event?: React.SyntheticEvent) {
+    if (event) event.preventDefault();
 
     if (
       !stakeholderDraft.name.trim() ||
@@ -329,8 +392,8 @@ export default function BrdCreateWizard() {
     setNotice("");
   }
 
-  function addDeliverable(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function addDeliverable(event?: React.SyntheticEvent) {
+    if (event) event.preventDefault();
 
     if (!deliverableDraft.name.trim()) {
       setNotice("Deliverable name is required.");
@@ -409,12 +472,16 @@ export default function BrdCreateWizard() {
       const payload = {
         title: form.title.trim(),
         description: form.description.trim(),
+        projectId: selectedProjectId || undefined,
         projectCode: form.projectCode.trim(),
         projectName: form.projectName.trim(),
         clientName: form.client.trim(),
+        type: form.brdType || "Business Requirement Document",
+        tags: ["Core", "Requirements"],
         status: asDraft ? "Draft" : form.status,
+        approvalStatus: asDraft ? "Draft" : form.status,
         priority: form.priority,
-        version: form.version,
+        version: form.version || "v1.0",
         brdCode: form.code.trim(),
         brdType: form.brdType,
         confidentiality: form.confidentiality,
@@ -426,6 +493,12 @@ export default function BrdCreateWizard() {
         },
         deliverables: form.deliverables,
         stakeholders: form.stakeholders,
+        attachments: files.map((f) => ({
+          fileName: f.name,
+          sizeBytes: f.size,
+          mimeType: f.type,
+          uploadedAt: new Date().toISOString(),
+        })),
       } as unknown as BrdCreateInput;
 
       const created = await brdApi.create(payload);
@@ -465,7 +538,7 @@ export default function BrdCreateWizard() {
     <main className="bcw-page">
       <header className="bcw-header">
         <div className="bcw-breadcrumb">
-          <span className="bcw-project-chip">PRJ-001</span>
+          <span className="bcw-project-chip">{form.projectCode || "Select Project"}</span>
           <span>BRD &amp; Requirements</span>
           <ArrowRight size={13} />
           <strong>Create New BRD ({form.code || "New"})</strong>
@@ -559,19 +632,41 @@ export default function BrdCreateWizard() {
 
                 <div className="bcw-form-grid">
                   <Field label="BRD Title" required error={errors.title}>
-                    <Input value={form.title} onChange={(value) => update("title", value)} placeholder="e.g. AI-CMS Implementation BRD" />
+                    <Input value={form.title} onChange={(value) => update("title", value)} placeholder="e.g. Telehealth Core Consultation BRD" />
                   </Field>
                   <Field label="BRD Code" required error={errors.code}>
-                    <Input value={form.code} onChange={(value) => update("code", value)} placeholder="BRD-25-001" />
+                    <Input value={form.code} onChange={(value) => update("code", value.toUpperCase())} placeholder="e.g. BRD-00005" />
                   </Field>
                   <Field label="Project Code" required error={errors.projectCode}>
-                    <Input value={form.projectCode} onChange={(value) => update("projectCode", value)} placeholder="PRJ-001" />
+                    <select
+                      value={form.projectCode}
+                      onChange={(e) => handleProjectSelect(e.target.value)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        height: 38,
+                        borderRadius: 6,
+                        border: errors.projectCode ? "1px solid #ef4444" : "1px solid #d0d7e2",
+                        padding: "0 10px",
+                        fontSize: "12px",
+                        color: "#1e293b",
+                        background: "#fff",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="">Select Project Code *</option>
+                      {projectOptions.map((p) => (
+                        <option key={p._id || p.projectCode} value={p.projectCode}>
+                          {p.projectCode} — {p.projectName}
+                        </option>
+                      ))}
+                    </select>
                   </Field>
                   <Field label="Project Name" required error={errors.projectName}>
-                    <Input value={form.projectName} onChange={(value) => update("projectName", value)} placeholder="Project name" />
+                    <Input value={form.projectName} onChange={(value) => update("projectName", value)} placeholder="Auto-populated on selecting project" />
                   </Field>
                   <Field label="Client" required error={errors.client}>
-                    <Input value={form.client} onChange={(value) => update("client", value)} placeholder="Client / organization name" />
+                    <Input value={form.client} onChange={(value) => update("client", value)} placeholder="Auto-populated on selecting project" />
                   </Field>
                   <Field label="BRD Type" required>
                     <Select value={form.brdType} onChange={(value) => update("brdType", value)} options={["Business", "Technical", "Functional", "Integration"]} />
@@ -678,7 +773,7 @@ export default function BrdCreateWizard() {
                 </div>
 
                 {showDeliverableForm && (
-                  <form className="bcw-inline-form" onSubmit={addDeliverable}>
+                  <div className="bcw-inline-form">
                     <Field label="Deliverable Name" required>
                       <Input value={deliverableDraft.name} onChange={(value) => setDeliverableDraft((old) => ({ ...old, name: value }))} placeholder="BRD Document" />
                     </Field>
@@ -693,17 +788,17 @@ export default function BrdCreateWizard() {
                     </Field>
                     <div className="bcw-inline-actions">
                       <button type="button" className="bcw-btn" onClick={() => setShowDeliverableForm(false)}>Cancel</button>
-                      <button type="submit" className="bcw-btn bcw-btn-primary">Add</button>
+                      <button type="button" className="bcw-btn bcw-btn-primary" onClick={() => addDeliverable()}>Add</button>
                     </div>
-                  </form>
+                  </div>
                 )}
 
                 <div className="bcw-deliverable-list">
                   {form.deliverables.length === 0 ? (
                     <p className="bcw-empty-state">No deliverables added yet.</p>
                   ) : (
-                    form.deliverables.map((item) => (
-                      <div className="bcw-deliverable-row" key={item.id}>
+                    form.deliverables.map((item, dIdx) => (
+                      <div className="bcw-deliverable-row" key={item.id || `del-${dIdx}`}>
                         <div><strong>{item.name}</strong><span>{item.description || "No description"}</span></div>
                         <span>{item.owner || "Unassigned"}</span>
                         <span>{item.targetDate || "No target date"}</span>
@@ -735,7 +830,7 @@ export default function BrdCreateWizard() {
                 {errors.stakeholders && <p className="bcw-field-error">{errors.stakeholders}</p>}
 
                 {showStakeholderForm && (
-                  <form className="bcw-inline-form" onSubmit={addStakeholder}>
+                  <div className="bcw-inline-form">
                     <Field label="Full Name" required>
                       <Input value={stakeholderDraft.name} onChange={(value) => setStakeholderDraft((old) => ({ ...old, name: value }))} placeholder="Full name" />
                     </Field>
@@ -756,9 +851,9 @@ export default function BrdCreateWizard() {
                     </Field>
                     <div className="bcw-inline-actions">
                       <button type="button" className="bcw-btn" onClick={() => setShowStakeholderForm(false)}>Cancel</button>
-                      <button type="submit" className="bcw-btn bcw-btn-primary">Add Stakeholder</button>
+                      <button type="button" className="bcw-btn bcw-btn-primary" onClick={() => addStakeholder()}>Add Stakeholder</button>
                     </div>
-                  </form>
+                  </div>
                 )}
 
                 <div className="bcw-table-wrap">
@@ -772,8 +867,8 @@ export default function BrdCreateWizard() {
                       {form.stakeholders.length === 0 ? (
                         <tr><td colSpan={7} className="bcw-empty-cell">No stakeholders added yet.</td></tr>
                       ) : (
-                        form.stakeholders.map((person) => (
-                          <tr key={person.id}>
+                        form.stakeholders.map((person, pIdx) => (
+                          <tr key={person.id || `stk-${pIdx}`}>
                             <td><strong>{person.name}</strong></td>
                             <td>{person.role}</td>
                             <td>{person.organization || "—"}</td>

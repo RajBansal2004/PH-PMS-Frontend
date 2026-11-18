@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createSprint as createSprintApi, employees as getEmployeesApi, sprints as getSprintsApi } from "../../lib/api";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
-  Bell,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -13,38 +13,25 @@ import {
   ChevronLast,
   ChevronLeft,
   ChevronRight,
-  CircleHelp,
   Clock3,
   Download,
   FileText,
   Filter,
-  Flag,
-  MoreVertical,
   PlusCircle,
   Search,
   Settings,
   Upload,
   X,
+  MoreVertical,
+  FolderKanban,
+  RefreshCw,
 } from "lucide-react";
+import { sprintApi, type Sprint } from "../../lib/sprints/api";
+import { projects as getProjectsApi, milestones as getMilestonesApi } from "../../lib/api";
 import "./sprint-registry.css";
-import { useRouter } from "next/navigation";
 
 type SprintStatus = "Completed" | "In Progress" | "Upcoming" | "Overdue";
 type Priority = "High" | "Medium" | "Low" | "Critical";
-
-type Sprint = {
-  id: string;
-  name: string;
-  project: string;
-  milestone: string;
-  owner: string;
-  status: SprintStatus;
-  start: string;
-  end: string;
-  duration: number;
-  progress: number;
-  priority: Priority;
-};
 
 const statusNames: SprintStatus[] = ["Completed", "In Progress", "Upcoming", "Overdue"];
 
@@ -57,10 +44,11 @@ function PriorityBadge({ priority }: { priority: Priority }) {
 }
 
 function Progress({ value }: { value: number }) {
+  const safe = Math.min(100, Math.max(0, value));
   return (
     <div className="sr-progress">
-      <span className={value === 100 ? "done" : ""} style={{ width: `${value}%` }} />
-      <b>{value}%</b>
+      <span className={safe === 100 ? "done" : ""} style={{ width: `${safe}%` }} />
+      <b>{safe}%</b>
     </div>
   );
 }
@@ -90,11 +78,29 @@ function SummaryCard({
   );
 }
 
-function DonutChart({ total }: { total: number }) {
+function DonutChart({ total, completed, inProgress, upcoming, overdue }: { total: number; completed: number; inProgress: number; upcoming: number; overdue: number }) {
+  const t = Math.max(1, total);
+  const p1 = (completed / t) * 100;
+  const p2 = p1 + (inProgress / t) * 100;
+  const p3 = p2 + (upcoming / t) * 100;
+
   return (
     <div className="sr-donut-wrap">
-      <div className="sr-donut">
-        <div><b>{total}</b><span>Total</span></div>
+      <div
+        className="sr-donut"
+        style={{
+          background: `conic-gradient(
+            #078d5b 0% ${p1}%,
+            #1762f5 ${p1}% ${p2}%,
+            #f59e0b ${p2}% ${p3}%,
+            #e63838 ${p3}% 100%
+          )`,
+        }}
+      >
+        <div>
+          <b>{total}</b>
+          <span>Total</span>
+        </div>
       </div>
     </div>
   );
@@ -103,8 +109,11 @@ function DonutChart({ total }: { total: number }) {
 export default function SprintRegistry() {
   const router = useRouter();
   const [sprints, setSprints] = useState<Sprint[]>([]);
-  const [ownersList, setOwnersList] = useState<string[]>([]);
+  const [ownersList, setOwnersList] = useState<Array<{ id: string; name: string }>>([]);
+  const [projectsList, setProjectsList] = useState<any[]>([]);
+  const [milestonesList, setMilestonesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [search, setSearch] = useState("");
   const [project, setProject] = useState("All Projects");
   const [milestone, setMilestone] = useState("All Milestones");
@@ -119,64 +128,102 @@ export default function SprintRegistry() {
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+
+  // Quick create fields
   const [newSprintName, setNewSprintName] = useState("");
   const [newSprintOwner, setNewSprintOwner] = useState("");
-  const [newSprintProject, setNewSprintProject] = useState("PRJ-001");
-  const [newSprintMilestone, setNewSprintMilestone] = useState("MLS-002");
-  const [newSprintStart, setNewSprintStart] = useState("2026-11-09");
-  const [newSprintEnd, setNewSprintEnd] = useState("2026-11-22");
+  const [newSprintProject, setNewSprintProject] = useState("");
+  const [newSprintMilestone, setNewSprintMilestone] = useState("");
+  const [newSprintStart, setNewSprintStart] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newSprintEnd, setNewSprintEnd] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().slice(0, 10);
+  });
 
-  const loadSprints = async () => {
+  const loadAll = async () => {
     try {
       setLoading(true);
-      const [sRes, eRes] = await Promise.allSettled([
-        getSprintsApi(),
-        getEmployeesApi().catch(() => []),
+      const [sRes, pRes, mRes, personnel] = await Promise.allSettled([
+        sprintApi.list(),
+        getProjectsApi({ limit: 100 }),
+        getMilestonesApi(),
+        sprintApi.getPersonnel(),
       ]);
 
       if (sRes.status === "fulfilled") {
-        const raw = sRes.value;
-        const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
-        if (Array.isArray(list)) {
-          const mapped: Sprint[] = list.map((s: any) => ({
-            id: s.sprintCode || s.code || s._id || s.id,
-            name: s.name || "Sprint",
-            project: s.projectId?.projectName || s.projectCode || "Project",
-            milestone: s.milestoneId?.name || "Milestone",
-            owner: s.ownerId?.name || "Unassigned",
-            status: (s.status === "COMPLETED" ? "Completed" : s.status === "ACTIVE" ? "In Progress" : s.status === "OVERDUE" ? "Overdue" : "Upcoming") as SprintStatus,
-            start: s.startDate ? new Date(s.startDate).toLocaleDateString("en-IN") : "—",
-            end: s.endDate ? new Date(s.endDate).toLocaleDateString("en-IN") : "—",
-            duration: s.durationDays || 14,
-            progress: s.progress || 0,
-            priority: (s.priority || "Medium") as Priority,
-          }));
-          setSprints(mapped);
-        } else {
-          setSprints([]);
-        }
-      } else {
-        setSprints([]);
+        setSprints(sRes.value.items);
       }
 
-      if (eRes.status === "fulfilled" && Array.isArray(eRes.value)) {
-        const names = eRes.value.map((e: any) => e.name || e.email || "Employee");
-        setOwnersList(names);
-        if (names.length > 0 && !newSprintOwner) {
-          setNewSprintOwner(names[0]);
+      if (pRes.status === "fulfilled") {
+        const raw = pRes.value;
+        const pList = Array.isArray(raw) ? raw : (raw as any)?.items || (raw as any)?.data || [];
+        setProjectsList(pList);
+        if (pList.length > 0 && !newSprintProject) {
+          setNewSprintProject(pList[0]._id || pList[0].id);
+        }
+      }
+
+      if (mRes.status === "fulfilled") {
+        const raw = mRes.value;
+        const mList = Array.isArray(raw) ? raw : (raw as any)?.items || (raw as any)?.data || [];
+        setMilestonesList(mList);
+        if (mList.length > 0 && !newSprintMilestone) {
+          setNewSprintMilestone(mList[0]._id || mList[0].id);
+        }
+      }
+
+      if (personnel.status === "fulfilled") {
+        setOwnersList(personnel.value);
+        if (personnel.value.length > 0 && !newSprintOwner) {
+          setNewSprintOwner(personnel.value[0].name);
         }
       }
     } catch (err) {
-      console.warn("Failed to load sprints:", err);
-      setSprints([]);
+      console.warn("Failed to load sprint registry data:", err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadSprints();
+    loadAll();
   }, []);
+
+  const projectOptions = useMemo(() => {
+    const set = new Set<string>();
+    sprints.forEach((s) => {
+      if (s.projectCode) set.add(s.projectCode);
+      if (s.projectName && s.projectName !== "General Project") set.add(s.projectName);
+    });
+    projectsList.forEach((p) => {
+      if (p.projectCode) set.add(p.projectCode);
+      if (p.projectName) set.add(p.projectName);
+    });
+    return ["All Projects", ...Array.from(set)];
+  }, [sprints, projectsList]);
+
+  const milestoneOptions = useMemo(() => {
+    const set = new Set<string>();
+    sprints.forEach((s) => {
+      if (s.milestoneName) set.add(s.milestoneName);
+    });
+    milestonesList.forEach((m) => {
+      if (m.title || m.name) set.add(m.title || m.name);
+    });
+    return ["All Milestones", ...Array.from(set)];
+  }, [sprints, milestonesList]);
+
+  const ownerOptions = useMemo(() => {
+    const set = new Set<string>();
+    sprints.forEach((s) => {
+      if (s.ownerName && s.ownerName !== "Unassigned") set.add(s.ownerName);
+    });
+    ownersList.forEach((o) => {
+      if (o.name) set.add(o.name);
+    });
+    return ["All Owners", ...Array.from(set)];
+  }, [sprints, ownersList]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -184,21 +231,39 @@ export default function SprintRegistry() {
     return sprints.filter((s) => {
       const matchesSearch =
         !q ||
-        [s.id, s.name, s.project, s.milestone, s.owner].some((v) =>
-          v.toLowerCase().includes(q)
+        [s.id, s.sprintCode, s.name, s.projectName, s.projectCode, s.milestoneName, s.ownerName].some((v) =>
+          String(v || "").toLowerCase().includes(q)
         );
+
+      const matchesProject =
+        project === "All Projects" ||
+        s.projectCode === project ||
+        s.projectName === project;
+
+      const matchesMilestone =
+        milestone === "All Milestones" || s.milestoneName === milestone;
+
+      const matchesStatus = status === "All Status" || s.status === status;
+
+      const matchesOwner = owner === "All Owners" || s.ownerName === owner;
+
+      const matchesDuration =
+        duration === "All" ||
+        (duration === "7 Days" && s.durationDays <= 7) ||
+        (duration === "14 Days" && s.durationDays === 14) ||
+        (duration === "More than 14 Days" && s.durationDays > 14);
+
+      const matchesPriority =
+        priorityFilter === "All Priorities" || s.priority === priorityFilter;
 
       return (
         matchesSearch &&
-        (project === "All Projects" || s.project === project) &&
-        (milestone === "All Milestones" || s.milestone === milestone) &&
-        (status === "All Status" || s.status === status) &&
-        (owner === "All Owners" || s.owner === owner) &&
-        (duration === "All" ||
-          (duration === "7 Days" && s.duration <= 7) ||
-          (duration === "14 Days" && s.duration === 14) ||
-          (duration === "More than 14 Days" && s.duration > 14)) &&
-        (priorityFilter === "All Priorities" || s.priority === priorityFilter)
+        matchesProject &&
+        matchesMilestone &&
+        matchesStatus &&
+        matchesOwner &&
+        matchesDuration &&
+        matchesPriority
       );
     });
   }, [sprints, search, project, milestone, status, owner, duration, priorityFilter]);
@@ -218,6 +283,35 @@ export default function SprintRegistry() {
     [sprints]
   );
 
+  // Dynamic Priority Distribution
+  const priorityCounts = useMemo(() => {
+    const high = sprints.filter((s) => s.priority === "High" || s.priority === "Critical").length;
+    const med = sprints.filter((s) => s.priority === "Medium").length;
+    const low = sprints.filter((s) => s.priority === "Low").length;
+    const maxVal = Math.max(1, high, med, low);
+    return [
+      { name: "High", count: high, tone: "red", maxVal },
+      { name: "Medium", count: med, tone: "orange", maxVal },
+      { name: "Low", count: low, tone: "green", maxVal },
+    ];
+  }, [sprints]);
+
+  // Dynamic Progress Distribution
+  const progressDist = useMemo(() => {
+    const t = Math.max(1, sprints.length);
+    const q1 = sprints.filter((s) => s.progress >= 0 && s.progress <= 25).length;
+    const q2 = sprints.filter((s) => s.progress > 25 && s.progress <= 50).length;
+    const q3 = sprints.filter((s) => s.progress > 50 && s.progress <= 75).length;
+    const q4 = sprints.filter((s) => s.progress > 75 && s.progress <= 100).length;
+    return {
+      total: sprints.length,
+      q1: { count: q1, pct: ((q1 / t) * 100).toFixed(1) },
+      q2: { count: q2, pct: ((q2 / t) * 100).toFixed(1) },
+      q3: { count: q3, pct: ((q3 / t) * 100).toFixed(1) },
+      q4: { count: q4, pct: ((q4 / t) * 100).toFixed(1) },
+    };
+  }, [sprints]);
+
   const resetFilters = () => {
     setSearch("");
     setProject("All Projects");
@@ -230,9 +324,31 @@ export default function SprintRegistry() {
   };
 
   const exportCSV = () => {
-    const header = ["Sprint ID", "Sprint Name", "Project", "Milestone", "Sprint Owner", "Status", "Start Date", "End Date", "Duration", "Progress", "Priority"];
+    const header = [
+      "Sprint ID",
+      "Sprint Name",
+      "Project",
+      "Milestone",
+      "Sprint Owner",
+      "Status",
+      "Start Date",
+      "End Date",
+      "Duration",
+      "Progress (%)",
+      "Priority",
+    ];
     const rows = filtered.map((s) => [
-      s.id, s.name, s.project, s.milestone, s.owner, s.status, s.start, s.end, `${s.duration} Days`, `${s.progress}%`, s.priority,
+      s.sprintCode || s.id,
+      s.name,
+      s.projectName || s.projectCode || "Project",
+      s.milestoneName || "Milestone",
+      s.ownerName || "Unassigned",
+      s.status,
+      s.start || s.startDate || "—",
+      s.end || s.endDate || "—",
+      `${s.durationDays} Days`,
+      `${s.progress}%`,
+      s.priority,
     ]);
     const csv = [header, ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
@@ -240,7 +356,7 @@ export default function SprintRegistry() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = "sprint-registry.csv";
+    a.download = `sprint-registry-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -250,29 +366,67 @@ export default function SprintRegistry() {
     if (!newSprintName.trim()) return;
 
     try {
-      await createSprintApi({
+      const selectedOwner = ownersList.find((o) => o.name === newSprintOwner);
+      const targetProj =
+        projectsList.find(
+          (p: any) =>
+            p._id === newSprintProject ||
+            p.id === newSprintProject ||
+            p.projectCode === newSprintProject
+        ) || projectsList[0];
+
+      await sprintApi.create({
         name: newSprintName.trim(),
+        projectId: targetProj?._id || targetProj?.id,
+        milestoneId: newSprintMilestone || undefined,
+        ownerId: selectedOwner?.id,
+        ownerName: newSprintOwner,
         startDate: newSprintStart,
         endDate: newSprintEnd,
+        goal: newSprintName.trim(),
       });
-      loadSprints();
-    } catch (err) {
-      console.warn("Failed to create sprint:", err);
+      loadAll();
+      setShowCreate(false);
+      setNewSprintName("");
+      setPage(1);
+    } catch (err: any) {
+      alert(`Sprint creation failed: ${err?.message || "Server error"}`);
     }
-
-    setPage(1);
-    setShowCreate(false);
-    setNewSprintName("");
   };
 
-  const updateSprintStatus = (id: string, nextStatus: SprintStatus) => {
+  const updateSprintStatus = async (id: string, nextStatus: SprintStatus) => {
     setSprints((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: nextStatus } : s))
+      prev.map((s) => (s.id === id || s._id === id ? { ...s, status: nextStatus } : s))
     );
     setActiveMenu(null);
+    try {
+      const backendStatus =
+        nextStatus === "Completed"
+          ? "COMPLETED"
+          : nextStatus === "In Progress"
+          ? "ACTIVE"
+          : "PLANNED";
+      await sprintApi.updateStatus(id, backendStatus);
+    } catch (err) {
+      console.warn("Failed to update sprint status:", err);
+    }
   };
 
   const clearMenu = () => setActiveMenu(null);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "80px 24px", textAlign: "center", color: "#64748b" }}>
+        <RefreshCw size={32} className="animate-spin" style={{ margin: "0 auto 16px", color: "#3b82f6" }} />
+        <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>
+          Loading Sprint Registry...
+        </h3>
+        <p style={{ fontSize: "13px", color: "#94a3b8", margin: 0 }}>
+          Fetching active sprints, burndown progression, and project dependencies.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="sr-page" onClick={clearMenu}>
@@ -280,25 +434,32 @@ export default function SprintRegistry() {
         <div className="sr-breadcrumb">
           <span>Sprint Management</span>
           <b>›</b>
-          <strong>Sprint Registry (SPR-001)</strong>
+          <strong>Sprint Registry ({counts.total} Sprints)</strong>
         </div>
 
         <div className="sr-header-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="sr-primary"
             onClick={() => router.push("/sprints/new")}
+            type="button"
           >
             <PlusCircle size={14} /> Create Sprint
           </button>
-          <button onClick={() => setShowImport(true)}><Download size={14} /> Import</button>
-          <button onClick={exportCSV}><FileText size={14} /> Export <ChevronDown size={12} /></button>
+          <button type="button" onClick={() => setShowImport(true)}>
+            <Download size={14} /> Import
+          </button>
+          <button type="button" onClick={exportCSV}>
+            <FileText size={14} /> Export CSV <ChevronDown size={12} />
+          </button>
           <div className="sr-menu-wrap">
-            <button onClick={() => setShowMoreActions((v) => !v)}>More Actions <ChevronDown size={12} /></button>
+            <button type="button" onClick={() => setShowMoreActions((v) => !v)}>
+              More Actions <ChevronDown size={12} />
+            </button>
             {showMoreActions && (
               <div className="sr-menu">
-                <button onClick={exportCSV}>Export filtered sprints</button>
-                <button onClick={() => setShowImport(true)}>Import sprint data</button>
-                <button onClick={resetFilters}>Reset all filters</button>
+                <button type="button" onClick={exportCSV}>Export filtered sprints</button>
+                <button type="button" onClick={() => setShowImport(true)}>Import sprint data</button>
+                <button type="button" onClick={resetFilters}>Reset all filters</button>
               </div>
             )}
           </div>
@@ -308,17 +469,47 @@ export default function SprintRegistry() {
       <div className="sr-title-row">
         <div className="sr-title-icon"><FileText size={22} /></div>
         <div>
-          <h1>Sprint Registry <span>☆</span></h1>
-          <p>Central repository of all project sprints and their progress</p>
+          <h1>Sprint Registry</h1>
+          <p>Central repository of all project sprints, burndowns, and delivery cadences</p>
         </div>
       </div>
 
       <section className="sr-summary-grid">
-        <SummaryCard title="Total Sprints" value={counts.total} subtitle="Across all projects" tone="blue" icon={<FileText />} />
-        <SummaryCard title="Completed" value={counts.completed} subtitle={`${((counts.completed / counts.total) * 100 || 0).toFixed(2)}% of total`} tone="green" icon={<CheckCircle2 />} />
-        <SummaryCard title="In Progress" value={counts.progress} subtitle={`${((counts.progress / counts.total) * 100 || 0).toFixed(2)}% of total`} tone="blue" icon={<Clock3 />} />
-        <SummaryCard title="Upcoming" value={counts.upcoming} subtitle={`${((counts.upcoming / counts.total) * 100 || 0).toFixed(2)}% of total`} tone="orange" icon={<CalendarDays />} />
-        <SummaryCard title="Overdue" value={counts.overdue} subtitle={`${((counts.overdue / counts.total) * 100 || 0).toFixed(2)}% of total`} tone="red" icon={<AlertTriangle />} />
+        <SummaryCard
+          title="Total Sprints"
+          value={counts.total}
+          subtitle="Across all projects"
+          tone="blue"
+          icon={<FileText />}
+        />
+        <SummaryCard
+          title="Completed"
+          value={counts.completed}
+          subtitle={`${((counts.completed / Math.max(1, counts.total)) * 100).toFixed(1)}% of total`}
+          tone="green"
+          icon={<CheckCircle2 />}
+        />
+        <SummaryCard
+          title="In Progress"
+          value={counts.progress}
+          subtitle={`${((counts.progress / Math.max(1, counts.total)) * 100).toFixed(1)}% of total`}
+          tone="blue"
+          icon={<Clock3 />}
+        />
+        <SummaryCard
+          title="Upcoming"
+          value={counts.upcoming}
+          subtitle={`${((counts.upcoming / Math.max(1, counts.total)) * 100).toFixed(1)}% of total`}
+          tone="orange"
+          icon={<CalendarDays />}
+        />
+        <SummaryCard
+          title="Overdue"
+          value={counts.overdue}
+          subtitle={`${((counts.overdue / Math.max(1, counts.total)) * 100).toFixed(1)}% of total`}
+          tone="red"
+          icon={<AlertTriangle />}
+        />
       </section>
 
       <section className="sr-filter-panel">
@@ -329,31 +520,67 @@ export default function SprintRegistry() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search by Sprint ID, Name, Project, Milestone..."
           />
-          <Search size={13} />
         </label>
 
-        <FilterSelect label="Project" value={project} onChange={(v) => { setProject(v); setPage(1); }} options={["All Projects", "PRJ-001", "PRJ-002", "PRJ-003"]} />
-        <FilterSelect label="Milestone" value={milestone} onChange={(v) => { setMilestone(v); setPage(1); }} options={["All Milestones", "MLS-001", "MLS-002", "MLS-003", "MLS-004", "MLS-005", "MLS-006", "MLS-007", "MLS-008"]} />
-        <FilterSelect label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }} options={["All Status", ...statusNames]} />
-        <FilterSelect label="Sprint Owner" value={owner} onChange={(v) => { setOwner(v); setPage(1); }} options={["All Owners", ...ownersList]} />
-        <FilterSelect label="Duration" value={duration} onChange={(v) => { setDuration(v); setPage(1); }} options={["All", "7 Days", "14 Days", "More than 14 Days"]} />
+        <FilterSelect
+          label="Project"
+          value={project}
+          onChange={(v) => { setProject(v); setPage(1); }}
+          options={projectOptions}
+        />
+        <FilterSelect
+          label="Milestone"
+          value={milestone}
+          onChange={(v) => { setMilestone(v); setPage(1); }}
+          options={milestoneOptions}
+        />
+        <FilterSelect
+          label="Status"
+          value={status}
+          onChange={(v) => { setStatus(v); setPage(1); }}
+          options={["All Status", ...statusNames]}
+        />
+        <FilterSelect
+          label="Sprint Owner"
+          value={owner}
+          onChange={(v) => { setOwner(v); setPage(1); }}
+          options={ownerOptions}
+        />
+        <FilterSelect
+          label="Duration"
+          value={duration}
+          onChange={(v) => { setDuration(v); setPage(1); }}
+          options={["All", "7 Days", "14 Days", "More than 14 Days"]}
+        />
 
         <div className="sr-more-filter-wrap">
-          <button className={`sr-more-filter ${moreFilters ? "active" : ""}`} onClick={() => setMoreFilters((v) => !v)}>
+          <button
+            type="button"
+            className={`sr-more-filter ${moreFilters ? "active" : ""}`}
+            onClick={() => setMoreFilters((v) => !v)}
+          >
             <Filter size={14} /> More Filters
           </button>
           {moreFilters && (
             <div className="sr-extra-filter">
-              <label>Priority
-                <select value={priorityFilter} onChange={(e) => { setPriorityFilter(e.target.value); setPage(1); }}>
-                  {["All Priorities", "Critical", "High", "Medium", "Low"].map((v) => <option key={v}>{v}</option>)}
+              <label>
+                Priority
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => { setPriorityFilter(e.target.value); setPage(1); }}
+                >
+                  {["All Priorities", "Critical", "High", "Medium", "Low"].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
                 </select>
               </label>
             </div>
           )}
         </div>
 
-        <button className="sr-clear" onClick={resetFilters}>Clear</button>
+        <button type="button" className="sr-clear" onClick={resetFilters}>
+          Clear
+        </button>
       </section>
 
       <section className="sr-main-grid">
@@ -364,68 +591,132 @@ export default function SprintRegistry() {
               <table className="sr-sprint-table">
                 <thead>
                   <tr>
-                    <th>Sprint ID</th><th>Sprint Name</th><th>Project</th><th>Milestone</th>
-                    <th>Sprint Owner</th><th>Status</th><th>Start Date</th><th>End Date</th>
-                    <th>Duration</th><th>Progress</th><th>Priority</th><th>Actions</th>
+                    <th>Sprint ID</th>
+                    <th>Sprint Name</th>
+                    <th>Project</th>
+                    <th>Milestone</th>
+                    <th>Sprint Owner</th>
+                    <th>Status</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Duration</th>
+                    <th>Progress</th>
+                    <th>Priority</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((s) => (
-                    <tr key={s.id}>
-                      <td className="sr-id">{s.id}</td>
-                      <td className="sr-name">{s.name}</td>
-                      <td className="sr-id">{s.project}</td>
-                      <td className="sr-id">{s.milestone}</td>
-                      <td>{s.owner}</td>
-                      <td><StatusBadge status={s.status} /></td>
-                      <td>{s.start}</td>
-                      <td>{s.end}</td>
-                      <td>{s.duration} Days</td>
-                      <td><Progress value={s.progress} /></td>
-                      <td><PriorityBadge priority={s.priority} /></td>
-                      <td>
-                        <div className="sr-row-menu" onClick={(e) => e.stopPropagation()}>
-                          <button className="sr-row-menu-trigger" onClick={() => setActiveMenu(activeMenu === s.id ? null : s.id)}>
-                            <MoreVertical size={15} />
-                          </button>
-                          {activeMenu === s.id && (
-                            <div className="sr-row-menu-content">
-                              <button onClick={() => router.push(`/sprints/${s.id}/active`)}>View Sprint</button>
-                              <button onClick={() => router.push(`/sprints/${s.id}/planning`)}>Edit Sprint</button>
-                              <button onClick={() => updateSprintStatus(s.id, "Completed")}>Mark Completed</button>
-                              <button onClick={() => updateSprintStatus(s.id, "In Progress")}>Mark In Progress</button>
-                              <button onClick={() => updateSprintStatus(s.id, "Overdue")}>Mark Overdue</button>
-                            </div>
-                          )}
-                        </div>
+                  {visible.length > 0 ? (
+                    visible.map((s) => (
+                      <tr key={s.id || s.sprintCode}>
+                        <td className="sr-id">
+                          <Link href={`/sprints/${encodeURIComponent(s._id || s.id)}/active`} style={{ color: "#155eef", textDecoration: "none", fontWeight: 650 }}>
+                            {s.sprintCode || s.id}
+                          </Link>
+                        </td>
+                        <td className="sr-name">
+                          <strong>{s.name}</strong>
+                        </td>
+                        <td className="sr-id">{s.projectName || s.projectCode || "Project"}</td>
+                        <td className="sr-id">{s.milestoneName || "Milestone"}</td>
+                        <td>{s.ownerName || "Unassigned"}</td>
+                        <td><StatusBadge status={s.status} /></td>
+                        <td>{s.start || s.startDate || "—"}</td>
+                        <td>{s.end || s.endDate || "—"}</td>
+                        <td>{s.durationDays} Days</td>
+                        <td><Progress value={s.progress} /></td>
+                        <td><PriorityBadge priority={s.priority} /></td>
+                        <td>
+                          <div className="sr-row-menu" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="sr-row-menu-trigger"
+                              onClick={() => setActiveMenu(activeMenu === s.id ? null : s.id)}
+                              aria-label="Sprint actions"
+                            >
+                              <MoreVertical size={15} />
+                            </button>
+                            {activeMenu === s.id && (
+                              <div className="sr-row-menu-content">
+                                <button type="button" onClick={() => router.push(`/sprints/${encodeURIComponent(s._id || s.id)}/active`)}>
+                                  Active Board
+                                </button>
+                                <button type="button" onClick={() => router.push(`/sprints/${encodeURIComponent(s._id || s.id)}/planning`)}>
+                                  Sprint Planning
+                                </button>
+                                <button type="button" onClick={() => router.push(`/sprints/review/${encodeURIComponent(s._id || s.id)}`)}>
+                                  Sprint Review
+                                </button>
+                                <button type="button" onClick={() => router.push(`/sprints/retrospective/${encodeURIComponent(s._id || s.id)}`)}>
+                                  Sprint Retrospective
+                                </button>
+                                <button type="button" onClick={() => updateSprintStatus(s._id || s.id, "Completed")}>
+                                  Mark Completed
+                                </button>
+                                <button type="button" onClick={() => updateSprintStatus(s._id || s.id, "In Progress")}>
+                                  Mark In Progress
+                                </button>
+                                <button type="button" onClick={() => updateSprintStatus(s._id || s.id, "Overdue")}>
+                                  Mark Overdue
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={12} className="sr-empty">
+                        No sprints found in the database. Click &quot;Create Sprint&quot; to begin.
                       </td>
                     </tr>
-                  ))}
-                  {visible.length === 0 && (
-                    <tr><td colSpan={12} className="sr-empty">No sprints found. Try changing your filters.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
 
             <div className="sr-pagination">
-              <span>Showing {filtered.length ? (currentPage - 1) * pageSize + 1 : 0} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} sprints</span>
+              <span>
+                Showing {filtered.length ? (currentPage - 1) * pageSize + 1 : 0} to{" "}
+                {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} sprints
+              </span>
               <div className="sr-page-buttons">
-                <button onClick={() => setPage(1)} disabled={currentPage === 1}><ChevronFirst size={14} /></button>
-                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}><ChevronLeft size={14} /></button>
+                <button type="button" onClick={() => setPage(1)} disabled={currentPage === 1}>
+                  <ChevronFirst size={14} />
+                </button>
+                <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                  <ChevronLeft size={14} />
+                </button>
                 {Array.from({ length: Math.min(4, totalPages) }, (_, i) => {
                   const n = Math.min(Math.max(1, currentPage - 1) + i, totalPages);
-                  return <button key={n} className={currentPage === n ? "active" : ""} onClick={() => setPage(n)}>{n}</button>;
+                  return (
+                    <button
+                      type="button"
+                      key={n}
+                      className={currentPage === n ? "active" : ""}
+                      onClick={() => setPage(n)}
+                    >
+                      {n}
+                    </button>
+                  );
                 })}
-                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}><ChevronRight size={14} /></button>
-                <button onClick={() => setPage(totalPages)} disabled={currentPage === totalPages}><ChevronLast size={14} /></button>
+                <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+                  <ChevronRight size={14} />
+                </button>
+                <button type="button" onClick={() => setPage(totalPages)} disabled={currentPage === totalPages}>
+                  <ChevronLast size={14} />
+                </button>
               </div>
               <label className="sr-page-size">
-                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                >
                   <option value={10}>10 / page</option>
                   <option value={15}>15 / page</option>
                   <option value={20}>20 / page</option>
-                  <option value={28}>All / page</option>
+                  <option value={50}>50 / page</option>
                 </select>
                 <ChevronDown size={12} />
               </label>
@@ -436,11 +727,12 @@ export default function SprintRegistry() {
             <section className="sr-card sr-chart-card">
               <h2>Sprints by Priority</h2>
               <div className="sr-priority-chart">
-                <div className="sr-y-axis"><span>20</span><span>15</span><span>10</span><span>5</span><span>0</span></div>
                 <div className="sr-priority-plot">
-                  {[{ name: "High", count: 14, tone: "red" }, { name: "Medium", count: 10, tone: "orange" }, { name: "Low", count: 4, tone: "green" }].map((v) => (
+                  {priorityCounts.map((v) => (
                     <div className="sr-priority-column" key={v.name}>
-                      <b>{v.count}</b><i className={v.tone} style={{ height: `${(v.count / 20) * 100}%` }} /><span>{v.name}</span>
+                      <b>{v.count}</b>
+                      <i className={v.tone} style={{ height: `${Math.max(8, (v.count / v.maxVal) * 100)}%` }} />
+                      <span>{v.name}</span>
                     </div>
                   ))}
                 </div>
@@ -450,12 +742,14 @@ export default function SprintRegistry() {
             <section className="sr-card sr-chart-card">
               <h2>Sprint Progress Distribution</h2>
               <div className="sr-distribution">
-                <div className="sr-distribution-donut"><div><b>28</b><span>Total</span></div></div>
+                <div className="sr-distribution-donut">
+                  <div><b>{progressDist.total}</b><span>Total</span></div>
+                </div>
                 <div className="sr-distribution-legend">
-                  <span><i className="c1" />0% - 25% <b>6 (21.43%)</b></span>
-                  <span><i className="c2" />26% - 50% <b>8 (28.57%)</b></span>
-                  <span><i className="c3" />51% - 75% <b>7 (25.00%)</b></span>
-                  <span><i className="c4" />76% - 100% <b>7 (25.00%)</b></span>
+                  <span><i className="c1" />0% - 25% <b>{progressDist.q1.count} ({progressDist.q1.pct}%)</b></span>
+                  <span><i className="c2" />26% - 50% <b>{progressDist.q2.count} ({progressDist.q2.pct}%)</b></span>
+                  <span><i className="c3" />51% - 75% <b>{progressDist.q3.count} ({progressDist.q3.pct}%)</b></span>
+                  <span><i className="c4" />76% - 100% <b>{progressDist.q4.count} ({progressDist.q4.pct}%)</b></span>
                 </div>
               </div>
             </section>
@@ -463,15 +757,15 @@ export default function SprintRegistry() {
             <section className="sr-card sr-chart-card">
               <h2>Sprints by Owner</h2>
               <div className="sr-owner-chart">
-                {ownersList.map((name: string, i: number) => {
-                  const values = [7, 6, 5, 5, 5];
-                  const val = values[i] || 1;
+                {ownersList.slice(0, 5).map((o, i) => {
+                  const val = sprints.filter((s) => s.ownerName === o.name).length;
+                  const maxCount = Math.max(1, ...ownersList.map((x) => sprints.filter((s) => s.ownerName === x.name).length));
                   return (
-                    <div className="sr-owner-column" key={name}>
+                    <div className="sr-owner-column" key={o.name}>
                       <b>{val}</b>
-                      <i style={{ height: `${(val / 10) * 100}%` }} className={`owner-${i % 5}`} />
-                      <div className="sr-avatar">{name.split(" ").map((x: string) => x[0]).join("")}</div>
-                      <span>{name.split(" ")[0]}</span>
+                      <i style={{ height: `${Math.max(10, (val / maxCount) * 100)}%` }} className={`owner-${i % 5}`} />
+                      <div className="sr-avatar">{o.name.split(" ").map((x: string) => x[0]).join("")}</div>
+                      <span>{o.name.split(" ")[0]}</span>
                     </div>
                   );
                 })}
@@ -486,21 +780,37 @@ export default function SprintRegistry() {
             <div className="sr-table-scroll">
               <table>
                 <thead>
-                  <tr><th>Sprint ID</th><th>Sprint Name</th><th>Project</th><th>Status Change</th><th>Changed By</th><th>Changed On</th><th>Comments</th></tr>
+                  <tr>
+                    <th>Sprint ID</th>
+                    <th>Sprint Name</th>
+                    <th>Project</th>
+                    <th>Status</th>
+                    <th>Owner</th>
+                    <th>Timeline</th>
+                    <th>Execution</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {sprints.length === 0 ? (
-                    <tr><td colSpan={7} style={{ textAlign: "center", padding: "1.5rem" }}>No sprint audit logs recorded yet.</td></tr>
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "1.5rem", color: "#64748b" }}>
+                        No sprint activity recorded yet.
+                      </td>
+                    </tr>
                   ) : (
                     sprints.slice(0, 5).map((s) => (
                       <tr key={s.id}>
-                        <td className="sr-id">{s.id}</td>
-                        <td>{s.name}</td>
-                        <td className="sr-id">{s.project}</td>
-                        <td>{s.status}</td>
-                        <td>{s.owner}</td>
-                        <td>{s.start}</td>
-                        <td>Active</td>
+                        <td className="sr-id">
+                          <Link href={`/sprints/${encodeURIComponent(s._id || s.id)}/active`}>
+                            {s.sprintCode || s.id}
+                          </Link>
+                        </td>
+                        <td><strong>{s.name}</strong></td>
+                        <td className="sr-id">{s.projectName || s.projectCode || "Project"}</td>
+                        <td><StatusBadge status={s.status} /></td>
+                        <td>{s.ownerName || "Unassigned"}</td>
+                        <td>{s.start || s.startDate || "Scheduled"}</td>
+                        <td>{s.progress}% Completed</td>
                       </tr>
                     ))
                   )}
@@ -514,12 +824,18 @@ export default function SprintRegistry() {
           <section className="sr-card sr-status-card">
             <h2>Sprint Status Summary</h2>
             <div className="sr-status-summary">
-              <DonutChart total={counts.total} />
+              <DonutChart
+                total={counts.total}
+                completed={counts.completed}
+                inProgress={counts.progress}
+                upcoming={counts.upcoming}
+                overdue={counts.overdue}
+              />
               <div className="sr-status-legend">
-                <span><i className="green" />Completed <b>{counts.completed} ({counts.total ? (counts.completed / counts.total * 100).toFixed(1) : "0.0"}%)</b></span>
-                <span><i className="blue" />In Progress <b>{counts.progress} ({counts.total ? (counts.progress / counts.total * 100).toFixed(1) : "0.0"}%)</b></span>
-                <span><i className="orange" />Upcoming <b>{counts.upcoming} ({counts.total ? (counts.upcoming / counts.total * 100).toFixed(1) : "0.0"}%)</b></span>
-                <span><i className="red" />Overdue <b>{counts.overdue} ({counts.total ? (counts.overdue / counts.total * 100).toFixed(1) : "0.0"}%)</b></span>
+                <span><i className="green" />Completed <b>{counts.completed} ({counts.total ? ((counts.completed / counts.total) * 100).toFixed(1) : "0.0"}%)</b></span>
+                <span><i className="blue" />In Progress <b>{counts.progress} ({counts.total ? ((counts.progress / counts.total) * 100).toFixed(1) : "0.0"}%)</b></span>
+                <span><i className="orange" />Upcoming <b>{counts.upcoming} ({counts.total ? ((counts.upcoming / counts.total) * 100).toFixed(1) : "0.0"}%)</b></span>
+                <span><i className="red" />Overdue <b>{counts.overdue} ({counts.total ? ((counts.overdue / counts.total) * 100).toFixed(1) : "0.0"}%)</b></span>
               </div>
             </div>
           </section>
@@ -527,47 +843,106 @@ export default function SprintRegistry() {
           <section className="sr-card sr-milestone-chart">
             <h2>Sprints by Milestone</h2>
             {sprints.length === 0 ? (
-              <p style={{ textAlign: "center", padding: "1rem", color: "#667085", fontSize: "0.85rem" }}>No milestone sprint data available.</p>
+              <p style={{ textAlign: "center", padding: "1rem", color: "#667085", fontSize: "0.85rem" }}>
+                No milestone sprint data available.
+              </p>
             ) : (
-              Array.from(new Set(sprints.map((s) => s.milestone))).slice(0, 4).map((label, i) => {
-                const count = sprints.filter((s) => s.milestone === label).length;
+              Array.from(new Set(sprints.map((s) => s.milestoneName || "General Scope"))).slice(0, 4).map((label, i) => {
+                const count = sprints.filter((s) => (s.milestoneName || "General Scope") === label).length;
                 return (
                   <div className="sr-horizontal-bar" key={label}>
                     <span>{label}</span>
-                    <div><i className={`milestone-${i}`} style={{ width: `${Math.min(100, (count / (sprints.length || 1)) * 100)}%` }} /></div>
+                    <div>
+                      <i className={`milestone-${i}`} style={{ width: `${Math.min(100, (count / (sprints.length || 1)) * 100)}%` }} />
+                    </div>
                     <b>{count}</b>
                   </div>
                 );
               })
             )}
-            <div className="sr-chart-scale"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+            <div className="sr-chart-scale">
+              <span>0%</span>
+              <span>25%</span>
+              <span>50%</span>
+              <span>75%</span>
+              <span>100%</span>
+            </div>
           </section>
 
           <section className="sr-card sr-mini-list">
-            <div className="sr-card-heading"><h2>Overdue Sprints</h2><button onClick={() => { setStatus("Overdue"); setPage(1); }}>View All</button></div>
-            <div className="sr-mini-row"><b>SPR-008</b><span>Lab Integration Sprint</span><small>25 May 2025</small><em>High</em></div>
-            <div className="sr-mini-row"><b>SPR-015</b><span>API Gateway Sprint</span><small>18 May 2025</small><em className="critical">Critical</em></div>
+            <div className="sr-card-heading">
+              <h2>Overdue Sprints</h2>
+              <button type="button" onClick={() => { setStatus("Overdue"); setPage(1); }}>View All</button>
+            </div>
+            {sprints.filter((s) => s.status === "Overdue").length > 0 ? (
+              sprints
+                .filter((s) => s.status === "Overdue")
+                .slice(0, 3)
+                .map((s) => (
+                  <div className="sr-mini-row" key={s.id}>
+                    <b>{s.sprintCode || s.id}</b>
+                    <span>{s.name}</span>
+                    <small>{s.end || s.endDate || "Past due"}</small>
+                    <em className="critical">{s.priority}</em>
+                  </div>
+                ))
+            ) : (
+              <p style={{ margin: "12px 0", fontSize: "12.5px", color: "#64748b" }}>
+                No overdue sprints in project backlog.
+              </p>
+            )}
           </section>
 
           <section className="sr-card sr-mini-list">
-            <div className="sr-card-heading"><h2>Upcoming Sprints</h2><button onClick={() => { setStatus("Upcoming"); setPage(1); }}>View All</button></div>
-            <div className="sr-mini-row"><b>SPR-004</b><span>Billing Module Sprint</span><small>09 Jun 2025</small></div>
-            <div className="sr-mini-row"><b>SPR-005</b><span>Reports &amp; Analytics Sprint</span><small>23 Jun 2025</small></div>
-            <div className="sr-mini-row"><b>SPR-010</b><span>Mobile App Sprint</span><small>02 Jun 2025</small></div>
+            <div className="sr-card-heading">
+              <h2>Upcoming Sprints</h2>
+              <button type="button" onClick={() => { setStatus("Upcoming"); setPage(1); }}>View All</button>
+            </div>
+            {sprints.filter((s) => s.status === "Upcoming").length > 0 ? (
+              sprints
+                .filter((s) => s.status === "Upcoming")
+                .slice(0, 3)
+                .map((s) => (
+                  <div className="sr-mini-row" key={s.id}>
+                    <b>{s.sprintCode || s.id}</b>
+                    <span>{s.name}</span>
+                    <small>{s.start || s.startDate || "Scheduled"}</small>
+                  </div>
+                ))
+            ) : (
+              <p style={{ margin: "12px 0", fontSize: "12.5px", color: "#64748b" }}>
+                No upcoming sprints queued.
+              </p>
+            )}
           </section>
 
           <section className="sr-card sr-quick-actions">
             <h2>Quick Actions</h2>
             <div>
-              <button onClick={() => router.push("/sprints/new")}>
+              <button type="button" onClick={() => router.push("/sprints/new")}>
                 <PlusCircle />
                 <span>Create Sprint</span>
               </button>
-              <button onClick={() => alert("Connect Sprint Calendar route")}><CalendarDays /><span>Sprint Calendar</span></button>
-              <button onClick={() => alert("Connect Sprint Timeline route")}><Activity /><span>Sprint Timeline</span></button>
-              <button onClick={exportCSV}><FileText /><span>Sprint Report</span></button>
-              <button onClick={() => setShowImport(true)}><Upload /><span>Import Sprints</span></button>
-              <button onClick={() => alert("Connect Sprint Settings route")}><Settings /><span>Sprint Settings</span></button>
+              <button type="button" onClick={() => router.push("/milestones/calendar")}>
+                <CalendarDays />
+                <span>Sprint Calendar</span>
+              </button>
+              <button type="button" onClick={() => router.push("/milestones/timeline")}>
+                <Activity />
+                <span>Sprint Timeline</span>
+              </button>
+              <button type="button" onClick={exportCSV}>
+                <FileText />
+                <span>Sprint Report</span>
+              </button>
+              <button type="button" onClick={() => router.push("/milestones/progress-rules")}>
+                <FolderKanban />
+                <span>Progress Rules</span>
+              </button>
+              <button type="button" onClick={() => router.push("/milestones")}>
+                <Settings />
+                <span>Milestone Registry</span>
+              </button>
             </div>
           </section>
         </aside>
@@ -577,18 +952,79 @@ export default function SprintRegistry() {
         <div className="sr-modal-backdrop" onClick={() => setShowCreate(false)}>
           <form className="sr-modal" onSubmit={createSprint} onClick={(e) => e.stopPropagation()}>
             <div className="sr-modal-heading">
-              <div><h2>Create Sprint</h2><p>Add a sprint to the project registry.</p></div>
+              <div>
+                <h2>Create Sprint</h2>
+                <p>Add a sprint to the project registry.</p>
+              </div>
               <button type="button" onClick={() => setShowCreate(false)}><X size={18} /></button>
             </div>
-            <label>Sprint Name<input required value={newSprintName} onChange={(e) => setNewSprintName(e.target.value)} placeholder="e.g. Authentication Sprint" /></label>
+            <label>
+              Sprint Name
+              <input
+                required
+                value={newSprintName}
+                onChange={(e) => setNewSprintName(e.target.value)}
+                placeholder="e.g. Telehealth Engine Sprint 1"
+              />
+            </label>
             <div className="sr-form-grid">
-              <label>Project<select value={newSprintProject} onChange={(e) => setNewSprintProject(e.target.value)}><option>PRJ-001</option><option>PRJ-002</option><option>PRJ-003</option></select></label>
-              <label>Milestone<select value={newSprintMilestone} onChange={(e) => setNewSprintMilestone(e.target.value)}>{["MLS-001", "MLS-002", "MLS-003", "MLS-004", "MLS-005", "MLS-006", "MLS-007", "MLS-008"].map((v) => <option key={v}>{v}</option>)}</select></label>
-              <label>Sprint Owner<select value={newSprintOwner} onChange={(e) => setNewSprintOwner(e.target.value)}>{ownersList.map((v: string) => <option key={v}>{v}</option>)}</select></label>
-              <label>Start Date<input type="date" required value={newSprintStart} onChange={(e) => setNewSprintStart(e.target.value)} /></label>
-              <label>End Date<input type="date" required min={newSprintStart} value={newSprintEnd} onChange={(e) => setNewSprintEnd(e.target.value)} /></label>
+              <label>
+                Project
+                <select value={newSprintProject} onChange={(e) => setNewSprintProject(e.target.value)}>
+                  {projectsList.map((p: any) => (
+                    <option key={p._id || p.id} value={p._id || p.id}>
+                      {p.projectCode ? `${p.projectCode} - ` : ""}{p.projectName || "Project"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Milestone
+                <select value={newSprintMilestone} onChange={(e) => setNewSprintMilestone(e.target.value)}>
+                  <option value="">General Scope (No Milestone)</option>
+                  {milestonesList.map((m: any) => (
+                    <option key={m._id || m.id} value={m._id || m.id}>
+                      {m.milestoneCode ? `${m.milestoneCode} - ` : ""}{m.title || m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Sprint Owner
+                <select value={newSprintOwner} onChange={(e) => setNewSprintOwner(e.target.value)}>
+                  {ownersList.map((o) => (
+                    <option key={o.id} value={o.name}>{o.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Start Date
+                <input
+                  type="date"
+                  required
+                  value={newSprintStart}
+                  onChange={(e) => setNewSprintStart(e.target.value)}
+                />
+              </label>
+              <label>
+                End Date
+                <input
+                  type="date"
+                  required
+                  min={newSprintStart}
+                  value={newSprintEnd}
+                  onChange={(e) => setNewSprintEnd(e.target.value)}
+                />
+              </label>
             </div>
-            <div className="sr-modal-actions"><button type="button" className="secondary" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="sr-primary">Create Sprint</button></div>
+            <div className="sr-modal-actions">
+              <button type="button" className="secondary" onClick={() => setShowCreate(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="sr-primary">
+                Create Sprint
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -596,9 +1032,27 @@ export default function SprintRegistry() {
       {showImport && (
         <div className="sr-modal-backdrop" onClick={() => setShowImport(false)}>
           <div className="sr-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="sr-modal-heading"><div><h2>Import Sprints</h2><p>Choose a CSV file to prepare sprint import.</p></div><button onClick={() => setShowImport(false)}><X size={18} /></button></div>
-            <div className="sr-upload-box"><Upload size={25} /><b>Choose CSV file</b><span>CSV import UI preview. Backend import is not connected yet.</span><input type="file" accept=".csv" /></div>
-            <div className="sr-modal-actions"><button className="secondary" onClick={() => setShowImport(false)}>Cancel</button><button className="sr-primary" onClick={() => { setShowImport(false); }}>Close</button></div>
+            <div className="sr-modal-heading">
+              <div>
+                <h2>Import Sprints</h2>
+                <p>Choose a CSV file to import sprint definitions.</p>
+              </div>
+              <button type="button" onClick={() => setShowImport(false)}><X size={18} /></button>
+            </div>
+            <div className="sr-upload-box">
+              <Upload size={25} />
+              <b>Choose CSV file</b>
+              <span>Upload formatted sprint CSV backlog</span>
+              <input type="file" accept=".csv" />
+            </div>
+            <div className="sr-modal-actions">
+              <button type="button" className="secondary" onClick={() => setShowImport(false)}>
+                Cancel
+              </button>
+              <button type="button" className="sr-primary" onClick={() => setShowImport(false)}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -620,7 +1074,16 @@ function FilterSelect({
   return (
     <label className="sr-filter-select">
       <span>{label}</span>
-      <div><select value={value} onChange={(e) => onChange(e.target.value)}>{options.map((v) => <option key={v}>{v}</option>)}</select><ChevronDown size={12} /></div>
+      <div>
+        <select value={value} onChange={(e) => onChange(e.target.value)}>
+          {options.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <ChevronDown size={12} />
+      </div>
     </label>
   );
 }

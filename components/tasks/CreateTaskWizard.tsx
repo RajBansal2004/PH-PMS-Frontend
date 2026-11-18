@@ -1,17 +1,14 @@
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
   ChevronDown,
-  Circle,
   CloudUpload,
-  Download,
-  File,
   FileText,
   Image as ImageIcon,
   Link as LinkIcon,
@@ -29,15 +26,30 @@ import {
   Loader2,
 } from "lucide-react";
 import "./create-task-wizard.css";
-import { createTask as apiCreateTask, employees, projects, sprints } from "../../lib/api";
+import {
+  projects as getProjectsApi,
+  milestones as getMilestonesApi,
+  requirements as getRequirementsApi,
+} from "../../lib/api";
+import { sprintApi, type Sprint } from "../../lib/sprints/api";
+import { getStoredUser } from "../../lib/auth";
+import {
+  taskApi,
+  isValidObjectId,
+  toBackendPriority,
+  toBackendStatus,
+  type NormalizedTask,
+} from "../../lib/tasks/api";
 
 type TaskForm = {
   title: string;
-  parent: string;
-  project: string;
-  sprint: string;
+  projectId: string;
+  milestoneId: string;
+  sprintId: string;
+  requirementId: string;
   type: string;
   priority: string;
+  status: string;
   assignee: string;
   reporter: string;
   labels: string[];
@@ -46,11 +58,11 @@ type TaskForm = {
   blockedBy: string;
   category: string;
   risk: string;
-  plannedIn: string;
   acceptance: string;
   definitionOfDone: string;
   estimatedHours: string;
   remainingHours: string;
+  storyPoints: string;
   startDate: string;
   dueDate: string;
   workingDays: string[];
@@ -68,13 +80,22 @@ type UploadedFile = {
   type: string;
 };
 
-const initialForm: TaskForm = {
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const plusDaysIso = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+const makeInitialForm = (): TaskForm => ({
   title: "",
-  parent: "",
-  project: "",
-  sprint: "",
+  projectId: "",
+  milestoneId: "",
+  sprintId: "",
+  requirementId: "",
   type: "Development",
   priority: "Medium",
+  status: "To Do",
   assignee: "",
   reporter: "",
   labels: [],
@@ -83,20 +104,20 @@ const initialForm: TaskForm = {
   blockedBy: "",
   category: "Feature",
   risk: "Low",
-  plannedIn: "",
   acceptance: "",
   definitionOfDone: "",
-  estimatedHours: "",
-  remainingHours: "",
-  startDate: "",
-  dueDate: "",
+  estimatedHours: "8",
+  remainingHours: "8",
+  storyPoints: "2",
+  startDate: todayIso(),
+  dueDate: plusDaysIso(5),
   workingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
   dailyCapacity: "8 hrs / day",
   calendar: "Default Project Calendar",
   timezone: "(GMT+05:30) Asia/Kolkata",
   designLink: "",
   apiLink: "",
-};
+});
 
 const steps = [
   "Basic Information",
@@ -105,23 +126,6 @@ const steps = [
   "Attachments",
   "Review",
 ];
-
-const people = [
-  "Amit Kumar",
-  "Mayank Swaroop",
-  "Priya Verma",
-  "Rahul Sharma",
-  "Neha Gupta",
-  "Vikas Singh",
-];
-
-const stepFields: Record<number, string[]> = {
-  0: ["title", "parent", "project", "sprint", "type", "priority", "assignee"],
-  1: ["description", "acceptance", "definitionOfDone"],
-  2: ["estimatedHours", "remainingHours", "startDate", "dueDate"],
-  3: [],
-  4: [],
-};
 
 function Field({
   label,
@@ -143,9 +147,7 @@ function Field({
   );
 }
 
-function TextInput(
-  props: React.InputHTMLAttributes<HTMLInputElement>,
-) {
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input className="ctw-input" {...props} />;
 }
 
@@ -156,7 +158,7 @@ function SelectInput({
 }: {
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: { value: string; label: string }[];
 }) {
   return (
     <div className="ctw-select-wrap">
@@ -166,8 +168,8 @@ function SelectInput({
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
+          <option key={`${option.value}-${option.label}`} value={option.value}>
+            {option.label}
           </option>
         ))}
       </select>
@@ -177,52 +179,129 @@ function SelectInput({
 }
 
 export default function CreateTaskWizard() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<TaskForm>(initialForm);
+  const [form, setForm] = useState<TaskForm>(makeInitialForm);
   const [files, setFiles] = useState<UploadedFile[]>([]);
+
   const [projectList, setProjectList] = useState<any[]>([]);
-  const [employeeList, setEmployeeList] = useState<any[]>([]);
+  const [milestoneList, setMilestoneList] = useState<any[]>([]);
+  const [sprintList, setSprintList] = useState<Sprint[]>([]);
+  const [requirementList, setRequirementList] = useState<any[]>([]);
+  const [existingTasks, setExistingTasks] = useState<NormalizedTask[]>([]);
+  const [personnel, setPersonnel] = useState<{ id: string; employeeId?: string; name: string; email?: string; role?: string }[]>([]);
+
   const [submitting, setSubmitting] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-  const [taskId, setTaskId] = useState("TSK-016");
-  const [createAnother, setCreateAnother] = useState(false);
+  const [taskId, setTaskId] = useState("TSK-0001");
   const [toast, setToast] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const loadInitialData = async () => {
+    const user = getStoredUser();
+    const initialStatusParam =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("status")
+        : null;
+
+    const [codeRes, pRes, sRes, rRes, tRes, peopleRes] = await Promise.allSettled([
+      taskApi.getNextCode(),
+      getProjectsApi({ limit: 100 }),
+      sprintApi.list({ limit: 100 }),
+      getRequirementsApi({ limit: 100 }).catch(() => []),
+      taskApi.list({ limit: 100 }),
+      taskApi.getPersonnel(),
+    ]);
+
+    if (codeRes.status === "fulfilled" && codeRes.value?.nextCode) {
+      setTaskId(codeRes.value.nextCode);
+    }
+
+    let defaultProjId = "";
+    if (pRes.status === "fulfilled") {
+      const raw: any = pRes.value;
+      const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
+      setProjectList(list);
+      if (list.length > 0) {
+        defaultProjId = list[0]._id || list[0].id;
+      }
+    }
+
+    if (sRes.status === "fulfilled") {
+      setSprintList(sRes.value.items || []);
+    }
+
+    if (rRes.status === "fulfilled") {
+      const raw: any = rRes.value;
+      const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
+      setRequirementList(list);
+    }
+
+    if (tRes.status === "fulfilled") {
+      setExistingTasks(tRes.value.items || []);
+    }
+
+    let defaultAssignee = "";
+    if (peopleRes.status === "fulfilled") {
+      const list = peopleRes.value || [];
+      setPersonnel(list);
+      if (list.length > 0) defaultAssignee = list[0].name;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      projectId: prev.projectId || defaultProjId,
+      assignee: prev.assignee || defaultAssignee,
+      reporter: prev.reporter || user?.name || defaultAssignee || "PH PMS Admin",
+      status: initialStatusParam || prev.status,
+    }));
+  };
+
   useEffect(() => {
-    Promise.all([
-      projects().catch(() => []),
-      employees().catch(() => []),
-    ]).then(([pRes, eRes]: [any, any]) => {
-      const pList = Array.isArray(pRes) ? pRes : pRes?.items || [];
-      const eList = Array.isArray(eRes) ? eRes : eRes?.items || [];
-      if (pList.length > 0) {
-        setProjectList(pList);
-        setForm((prev) => ({ ...prev, project: prev.project || pList[0].projectName || pList[0].name || "" }));
-      }
-      if (eList.length > 0) {
-        setEmployeeList(eList);
-        setForm((prev) => ({
-          ...prev,
-          assignee: prev.assignee || eList[0].name || `${eList[0].firstName || ""} ${eList[0].lastName || ""}`.trim() || eList[0].email,
-        }));
-      }
-    });
+    loadInitialData();
   }, []);
 
-  const update = <K extends keyof TaskForm>(
-    key: K,
-    value: TaskForm[K],
-  ) => {
+  // Load milestones for selected project
+  useEffect(() => {
+    if (!form.projectId) {
+      setMilestoneList([]);
+      return;
+    }
+    getMilestonesApi(form.projectId)
+      .then((res: any) => {
+        const list = Array.isArray(res) ? res : res?.data || res?.items || [];
+        setMilestoneList(list);
+      })
+      .catch(() => setMilestoneList([]));
+  }, [form.projectId]);
+
+  const projectSprints = useMemo(() => {
+    if (!form.projectId) return sprintList;
+    return sprintList.filter((s) => {
+      const pid = typeof s.projectId === "object" ? s.projectId?._id : s.projectId;
+      return !pid || pid === form.projectId;
+    });
+  }, [sprintList, form.projectId]);
+
+  const projectRequirements = useMemo(() => {
+    if (!form.projectId) return requirementList;
+    return requirementList.filter((r) => {
+      const pid = typeof r.projectId === "object" ? r.projectId?._id : r.projectId;
+      return !pid || pid === form.projectId;
+    });
+  }, [requirementList, form.projectId]);
+
+  const selectedProject = projectList.find((p) => (p._id || p.id) === form.projectId);
+  const selectedSprint = projectSprints.find((s) => (s._id || s.id) === form.sprintId);
+  const selectedReq = projectRequirements.find((r) => (r._id || r.id) === form.requirementId);
+
+  const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const progress = useMemo(
-    () => Math.round(((step + 1) / steps.length) * 100),
-    [step],
-  );
+  const progress = useMemo(() => Math.round(((step + 1) / steps.length) * 100), [step]);
 
   const duration = useMemo(() => {
     if (!form.startDate || !form.dueDate) return 0;
@@ -232,9 +311,11 @@ export default function CreateTaskWizard() {
     let days = 0;
     const current = new Date(start);
     while (current <= end) {
-      if (form.workingDays.includes(
-        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][current.getDay()],
-      )) {
+      if (
+        form.workingDays.includes(
+          ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][current.getDay()]
+        )
+      ) {
         days++;
       }
       current.setDate(current.getDate() + 1);
@@ -243,7 +324,6 @@ export default function CreateTaskWizard() {
   }, [form.startDate, form.dueDate, form.workingDays]);
 
   const estimated = Number(form.estimatedHours) || 0;
-  const remaining = Number(form.remainingHours) || 0;
   const daily = Number.parseInt(form.dailyCapacity, 10) || 8;
   const available = duration * daily;
   const buffer = Math.max(available - estimated, 0);
@@ -254,33 +334,30 @@ export default function CreateTaskWizard() {
   };
 
   const validateStep = () => {
-    const required: Record<number, string[]> = {
-      0: ["title", "parent", "project", "sprint", "type", "priority", "assignee"],
-      1: ["description"],
-      2: ["estimatedHours", "remainingHours", "startDate", "dueDate"],
-      3: [],
-      4: [],
-    };
-
-    for (const key of required[step] || []) {
-      const value = form[key as keyof TaskForm];
-      if (typeof value === "string" && !value.trim()) {
-        setError("Please fill all required fields before continuing.");
+    if (step === 0) {
+      if (!form.title.trim()) {
+        setError("Please enter a Task Title.");
+        return false;
+      }
+      if (!form.projectId) {
+        setError("Please select a Project before continuing.");
         return false;
       }
     }
-
+    if (step === 1 && !form.description.trim()) {
+      setError("Please enter a task description.");
+      return false;
+    }
     if (step === 2) {
-      if (Number(form.estimatedHours) <= 0 || Number(form.remainingHours) < 0) {
-        setError("Please enter valid hour values.");
+      if (Number(form.estimatedHours) <= 0) {
+        setError("Please enter a valid estimated hours value (> 0).");
         return false;
       }
-      if (form.dueDate < form.startDate) {
+      if (form.startDate && form.dueDate && form.dueDate < form.startDate) {
         setError("Due date cannot be earlier than start date.");
         return false;
       }
     }
-
     setError("");
     return true;
   };
@@ -331,68 +408,87 @@ export default function CreateTaskWizard() {
       "workingDays",
       form.workingDays.includes(day)
         ? form.workingDays.filter((item) => item !== day)
-        : [...form.workingDays, day],
+        : [...form.workingDays, day]
     );
   };
 
   const saveDraft = () => {
     try {
       localStorage.setItem("ph-pms-task-draft", JSON.stringify(form));
-      showToast("Task draft saved on this device.");
+      showToast("Task draft saved.");
     } catch {
       showToast("Could not save draft in this browser.");
     }
   };
 
   const createTask = async () => {
-    if (!validateStep()) return;
+    if (!validateStep() || submitting) return;
     setSubmitting(true);
     setError("");
     try {
-      const nextId = `TSK-${String(
-        16 + Math.floor(Math.random() * 84),
-      ).padStart(3, "0")}`;
+      const matchedPerson = personnel.find((p) => p.name === form.assignee);
+      const backendStatus = form.sprintId
+        ? toBackendStatus(form.status)
+        : form.status === "To Do"
+        ? "BACKLOG"
+        : toBackendStatus(form.status);
 
-      const selProject = projectList.find(
-        (p) => (p.projectName || p.name) === form.project || (p._id || p.id) === form.project
-      );
-      const selAssignee = employeeList.find(
-        (e) => (e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim()) === form.assignee || (e._id || e.id) === form.assignee
-      );
-
-      const payload: any = {
-        taskId: nextId,
+      const payload: Record<string, any> = {
+        taskId: taskId.trim(),
+        projectId: form.projectId,
         title: form.title.trim(),
         description: form.description.trim() || form.title.trim(),
-        priority: form.priority?.toUpperCase() || "MEDIUM",
-        status: "BACKLOG",
-        projectId: selProject?._id || selProject?.id,
-        assigneeId: selAssignee?._id || selAssignee?.id,
-        estimatedHours: form.estimatedHours ? Number(form.estimatedHours) : null,
-        dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+        type: form.type,
+        priority: toBackendPriority(form.priority),
+        status: backendStatus,
+        assigneeName: form.assignee || "Unassigned",
+        reporterName: form.reporter || "PH PMS Admin",
+        tags: form.labels,
+        category: form.category,
+        risk: form.risk,
+        acceptanceCriteria: form.acceptance.trim(),
+        definitionOfDone: form.definitionOfDone.trim(),
+        dependencies: form.dependency && form.dependency !== "None" ? [form.dependency] : [],
+        blockedBy: form.blockedBy ? [form.blockedBy] : [],
+        estimatedHours: Number(form.estimatedHours) || 0,
+        storyPoints: Number(form.storyPoints) || Math.max(1, Math.round((Number(form.estimatedHours) || 4) / 4)),
+        startDate: form.startDate ? new Date(`${form.startDate}T00:00:00`).toISOString() : null,
+        dueDate: form.dueDate ? new Date(`${form.dueDate}T00:00:00`).toISOString() : null,
+        designLink: form.designLink.trim(),
+        apiLink: form.apiLink.trim(),
+        attachments: files,
       };
 
-      if (payload.projectId && payload.assigneeId) {
-        await apiCreateTask(payload).catch((err) => {
-          console.warn("Task saved with fallback:", err);
-        });
+      if (isValidObjectId(form.milestoneId)) payload.milestoneId = form.milestoneId;
+      if (isValidObjectId(form.sprintId)) payload.sprintId = form.sprintId;
+      if (isValidObjectId(form.requirementId)) payload.requirementId = form.requirementId;
+      if (matchedPerson?.employeeId && isValidObjectId(matchedPerson.employeeId)) {
+        payload.assigneeId = matchedPerson.employeeId;
       }
 
-      setTaskId(nextId);
+      const res = await taskApi.create(payload);
+      setTaskId(res.taskId || taskId);
       setSuccess(true);
     } catch (err: any) {
-      setError(err.message || "Failed to create task.");
+      setError(err?.message || "Failed to create task. Please verify all fields.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const resetWizard = () => {
-    setForm(initialForm);
+  const resetWizard = async () => {
+    setForm((prev) => ({
+      ...makeInitialForm(),
+      projectId: prev.projectId,
+      assignee: prev.assignee,
+      reporter: prev.reporter,
+    }));
     setFiles([]);
     setStep(0);
     setError("");
     setSuccess(false);
+    const codeRes = await taskApi.getNextCode();
+    if (codeRes?.nextCode) setTaskId(codeRes.nextCode);
   };
 
   const renderProgress = () => (
@@ -425,38 +521,68 @@ export default function CreateTaskWizard() {
           <TextInput
             value={form.title}
             onChange={(e) => update("title", e.target.value)}
-            placeholder="Enter task title"
-          />
-        </Field>
-
-        <Field label="Associated Story / Parent" required>
-          <SelectInput
-            value={form.parent}
-            onChange={(v) => update("parent", v)}
-            options={[
-              "US-145 - Doctor dashboard redesign",
-              "US-146 - Patient profile",
-              "US-147 - Login and authentication",
-            ]}
+            placeholder="e.g. Build ABDM patient consent verification endpoint"
           />
         </Field>
 
         <div className="ctw-two-fields">
           <Field label="Project" required>
             <SelectInput
-              value={form.project}
-              onChange={(v) => update("project", v)}
-              options={["AI-CMS Redesign", "PHEOS PMS", "School ERP"]}
+              value={form.projectId}
+              onChange={(v) => {
+                setForm((prev) => ({ ...prev, projectId: v, sprintId: "", milestoneId: "", requirementId: "" }));
+              }}
+              options={
+                projectList.length > 0
+                  ? projectList.map((p) => ({
+                      value: p._id || p.id,
+                      label: `${p.projectCode ? `${p.projectCode} - ` : ""}${p.projectName || p.name}`,
+                    }))
+                  : [{ value: "", label: "No active projects found" }]
+              }
             />
           </Field>
-          <Field label="Sprint" required>
+
+          <Field label="Sprint">
             <SelectInput
-              value={form.sprint}
-              onChange={(v) => update("sprint", v)}
+              value={form.sprintId}
+              onChange={(v) => update("sprintId", v)}
               options={[
-                "Sprint 12 (26 May – 08 Jun 2025)",
-                "Sprint 13 (09 Jun – 22 Jun 2025)",
-                "Backlog",
+                { value: "", label: "Product Backlog (Unassigned)" },
+                ...projectSprints.map((s) => ({
+                  value: s._id || s.id,
+                  label: `${s.sprintCode} — ${s.name}`,
+                })),
+              ]}
+            />
+          </Field>
+        </div>
+
+        <div className="ctw-two-fields">
+          <Field label="Milestone (Optional)">
+            <SelectInput
+              value={form.milestoneId}
+              onChange={(v) => update("milestoneId", v)}
+              options={[
+                { value: "", label: "None" },
+                ...milestoneList.map((m) => ({
+                  value: m._id || m.id,
+                  label: `${m.milestoneCode ? `${m.milestoneCode} - ` : ""}${m.title || m.name}`,
+                })),
+              ]}
+            />
+          </Field>
+
+          <Field label="Linked Requirement (Optional)">
+            <SelectInput
+              value={form.requirementId}
+              onChange={(v) => update("requirementId", v)}
+              options={[
+                { value: "", label: "None" },
+                ...projectRequirements.map((r) => ({
+                  value: r._id || r.id,
+                  label: `${r.requirementId || r.reqId || r.code || "REQ"} - ${r.title}`,
+                })),
               ]}
             />
           </Field>
@@ -467,31 +593,45 @@ export default function CreateTaskWizard() {
             <SelectInput
               value={form.type}
               onChange={(v) => update("type", v)}
-              options={["Development", "Design", "QA", "Documentation", "Bug"]}
+              options={["Development", "Design", "QA", "Documentation", "Bug", "Task"].map((v) => ({
+                value: v,
+                label: v,
+              }))}
             />
           </Field>
           <Field label="Priority" required>
             <SelectInput
               value={form.priority}
               onChange={(v) => update("priority", v)}
-              options={["High", "Medium", "Low", "Critical"]}
+              options={["Critical", "High", "Medium", "Low"].map((v) => ({ value: v, label: v }))}
             />
           </Field>
         </div>
 
         <div className="ctw-two-fields">
-          <Field label="Assignee" required>
+          <Field label="Assignee">
             <SelectInput
               value={form.assignee}
               onChange={(v) => update("assignee", v)}
-              options={people}
+              options={[
+                { value: "", label: "Unassigned" },
+                ...personnel.map((p) => ({
+                  value: p.name,
+                  label: p.email ? `${p.name} (${p.email})` : p.name,
+                })),
+              ]}
             />
           </Field>
           <Field label="Reporter">
             <SelectInput
               value={form.reporter}
               onChange={(v) => update("reporter", v)}
-              options={people}
+              options={[
+                ...(form.reporter && !personnel.some((p) => p.name === form.reporter)
+                  ? [{ value: form.reporter, label: form.reporter }]
+                  : []),
+                ...personnel.map((p) => ({ value: p.name, label: p.name })),
+              ]}
             />
           </Field>
         </div>
@@ -515,7 +655,7 @@ export default function CreateTaskWizard() {
                   addLabel();
                 }
               }}
-              placeholder="Add label..."
+              placeholder="Add label and press Enter..."
             />
             <button type="button" onClick={addLabel} aria-label="Add label">
               <Plus size={15} />
@@ -529,24 +669,24 @@ export default function CreateTaskWizard() {
           <div className="ctw-info-icon"><ClipboardList size={17} /></div>
           <div>
             <b>Task ID</b>
-            <strong>Auto-generated</strong>
-            <small>Task ID will be assigned when the task is created.</small>
+            <strong>{taskId}</strong>
+            <small>Sequential code auto-generated from database.</small>
           </div>
         </div>
         <div className="ctw-info-card">
           <div className="ctw-info-icon"><BriefcaseBusiness size={17} /></div>
           <div>
-            <b>Project context</b>
-            <strong>{form.project}</strong>
-            <small>Tasks are linked to a project and sprint for tracking.</small>
+            <b>Project &amp; Sprint</b>
+            <strong>{selectedProject?.projectName || "Select a project"}</strong>
+            <small>{selectedSprint ? `${selectedSprint.sprintCode} — ${selectedSprint.name}` : "Product Backlog"}</small>
           </div>
         </div>
         <div className="ctw-info-card">
           <div className="ctw-info-icon"><UserRound size={17} /></div>
           <div>
-            <b>Task ownership</b>
-            <strong>{form.assignee}</strong>
-            <small>Assigned team member responsible for delivery.</small>
+            <b>Task Ownership</b>
+            <strong>{form.assignee || "Unassigned"}</strong>
+            <small>Reporter: {form.reporter || "Current User"}</small>
           </div>
         </div>
       </div>
@@ -561,7 +701,7 @@ export default function CreateTaskWizard() {
             className="ctw-textarea ctw-description"
             value={form.description}
             onChange={(e) => update("description", e.target.value)}
-            placeholder="Describe the task..."
+            placeholder="Describe the technical scope and deliverable..."
           />
         </Field>
         <Field label="Acceptance Criteria">
@@ -569,7 +709,7 @@ export default function CreateTaskWizard() {
             className="ctw-textarea ctw-large-textarea"
             value={form.acceptance}
             onChange={(e) => update("acceptance", e.target.value)}
-            placeholder="Enter acceptance criteria, one per line"
+            placeholder="Enter acceptance criteria, one per line..."
           />
         </Field>
         <Field label="Definition of Done">
@@ -577,65 +717,60 @@ export default function CreateTaskWizard() {
             className="ctw-textarea ctw-large-textarea"
             value={form.definitionOfDone}
             onChange={(e) => update("definitionOfDone", e.target.value)}
-            placeholder="Enter definition of done, one per line"
+            placeholder="Code reviewed, unit tests passed, QA sign-off..."
           />
         </Field>
       </div>
 
       <div className="ctw-form-column">
-        <Field label="Dependency">
+        <Field label="Initial Workflow Status">
+          <SelectInput
+            value={form.status}
+            onChange={(v) => update("status", v)}
+            options={["To Do", "In Progress", "In Review", "Testing", "Done"].map((v) => ({
+              value: v,
+              label: v,
+            }))}
+          />
+        </Field>
+        <Field label="Dependency Type">
           <SelectInput
             value={form.dependency}
             onChange={(v) => update("dependency", v)}
-            options={["None", "Finish to Start", "Start to Start", "Finish to Finish"]}
+            options={["None", "Finish to Start", "Start to Start", "Finish to Finish"].map((v) => ({
+              value: v,
+              label: v,
+            }))}
           />
         </Field>
-        <Field label="Blocked By">
+        <Field label="Blocked By (Existing Task)">
           <SelectInput
-            value={form.blockedBy || "Select task..."}
-            onChange={(v) => update("blockedBy", v === "Select task..." ? "" : v)}
+            value={form.blockedBy}
+            onChange={(v) => update("blockedBy", v)}
             options={[
-              "Select task...",
-              "TSK-001 - Design login screen UI",
-              "TSK-002 - API integration for login",
-              "TSK-003 - Validate user login",
+              { value: "", label: "None (Unblocked)" },
+              ...existingTasks.map((t) => ({
+                value: `${t.taskId} - ${t.title}`,
+                label: `${t.taskId} - ${t.title}`,
+              })),
             ]}
           />
-        </Field>
-        <Field label="Tags / Labels">
-          <div className="ctw-chip-input">
-            {form.labels.map((label) => (
-              <span className="ctw-chip" key={label}>
-                {label}
-                <button type="button" onClick={() => removeLabel(label)}>
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
-            <button type="button" onClick={() => setNewLabel("New Label")}>
-              <Plus size={15} />
-            </button>
-          </div>
         </Field>
         <Field label="Task Category">
           <SelectInput
             value={form.category}
             onChange={(v) => update("category", v)}
-            options={["Feature", "Enhancement", "Bug Fix", "Technical Debt", "Support"]}
+            options={["Feature", "Enhancement", "Bug Fix", "Technical Debt", "Support"].map((v) => ({
+              value: v,
+              label: v,
+            }))}
           />
         </Field>
-        <Field label="Risk">
+        <Field label="Risk Level">
           <SelectInput
             value={form.risk}
             onChange={(v) => update("risk", v)}
-            options={["Low", "Medium", "High", "Critical"]}
-          />
-        </Field>
-        <Field label="Planned In">
-          <SelectInput
-            value={form.plannedIn}
-            onChange={(v) => update("plannedIn", v)}
-            options={["Sprint 12", "Sprint 13", "Product Backlog"]}
+            options={["Low", "Medium", "High", "Critical"].map((v) => ({ value: v, label: v }))}
           />
         </Field>
       </div>
@@ -653,44 +788,49 @@ export default function CreateTaskWizard() {
                 type="number"
                 min="1"
                 value={form.estimatedHours}
-                onChange={(e) => update("estimatedHours", e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    estimatedHours: val,
+                    remainingHours: val,
+                    storyPoints: String(Math.max(1, Math.round((Number(val) || 4) / 4))),
+                  }));
+                }}
               />
               <span>hrs</span>
             </div>
           </Field>
-          <Field label="Remaining Hours" required>
+          <Field label="Story Points">
             <div className="ctw-unit-input">
               <TextInput
                 type="number"
                 min="0"
-                value={form.remainingHours}
-                onChange={(e) => update("remainingHours", e.target.value)}
+                value={form.storyPoints}
+                onChange={(e) => update("storyPoints", e.target.value)}
               />
-              <span>hrs</span>
+              <span>SP</span>
             </div>
           </Field>
         </div>
 
         <div className="ctw-two-fields">
-          <Field label="Start Date" required>
+          <Field label="Start Date">
             <TextInput
               type="date"
               value={form.startDate}
               onChange={(e) => update("startDate", e.target.value)}
             />
           </Field>
-          <Field label="Due Date" required>
+          <Field label="Due Date">
             <TextInput
               type="date"
+              min={form.startDate}
               value={form.dueDate}
               onChange={(e) => update("dueDate", e.target.value)}
             />
           </Field>
         </div>
-
-        <Field label="Planned End Date">
-          <TextInput type="date" value={form.dueDate} readOnly />
-        </Field>
 
         <Field label="Time Zone">
           <SelectInput
@@ -700,7 +840,7 @@ export default function CreateTaskWizard() {
               "(GMT+05:30) Asia/Kolkata",
               "(GMT+00:00) UTC",
               "(GMT-05:00) America/New_York",
-            ]}
+            ].map((v) => ({ value: v, label: v }))}
           />
         </Field>
       </div>
@@ -725,14 +865,20 @@ export default function CreateTaskWizard() {
           <SelectInput
             value={form.dailyCapacity}
             onChange={(v) => update("dailyCapacity", v)}
-            options={["4 hrs / day", "6 hrs / day", "8 hrs / day", "10 hrs / day"]}
+            options={["4 hrs / day", "6 hrs / day", "8 hrs / day", "10 hrs / day"].map((v) => ({
+              value: v,
+              label: v,
+            }))}
           />
         </Field>
         <Field label="Calendar">
           <SelectInput
             value={form.calendar}
             onChange={(v) => update("calendar", v)}
-            options={["Default Project Calendar", "India Working Calendar", "Custom Calendar"]}
+            options={["Default Project Calendar", "India Working Calendar", "Custom Calendar"].map((v) => ({
+              value: v,
+              label: v,
+            }))}
           />
         </Field>
       </div>
@@ -761,7 +907,7 @@ export default function CreateTaskWizard() {
           }}
         >
           <CloudUpload size={30} />
-          <strong>Drag & drop files here or</strong>
+          <strong>Drag &amp; drop files here or</strong>
           <span>click to upload</span>
           <small>Max file size: 100 MB</small>
         </button>
@@ -832,24 +978,26 @@ export default function CreateTaskWizard() {
       <h3 className="ctw-subheading">Review Task Details</h3>
       <div className="ctw-review-grid">
         <div className="ctw-review-column">
+          <ReviewRow label="Task ID" value={taskId} />
           <ReviewRow label="Task Title" value={form.title} />
-          <ReviewRow label="Story / Parent" value={form.parent} />
+          <ReviewRow label="Project" value={selectedProject?.projectName || "—"} />
+          <ReviewRow label="Sprint" value={selectedSprint ? `${selectedSprint.sprintCode} — ${selectedSprint.name}` : "Product Backlog"} />
+          <ReviewRow label="Requirement" value={selectedReq ? `${selectedReq.requirementId || selectedReq.code || ""} ${selectedReq.title}` : "—"} />
           <ReviewRow label="Task Type" value={form.type} />
           <ReviewRow label="Priority" value={form.priority} />
-          <ReviewRow label="Assignee" value={form.assignee} />
-          <ReviewRow label="Reporter" value={form.reporter} />
-          <ReviewRow label="Labels" value={form.labels.join(", ") || "—"} />
-          <ReviewRow label="Status" value="To Do" badge />
+          <ReviewRow label="Assignee" value={form.assignee || "Unassigned"} />
+          <ReviewRow label="Status" value={form.status} badge />
         </div>
         <div className="ctw-review-column">
           <ReviewRow label="Estimated Hours" value={`${form.estimatedHours} hrs`} />
-          <ReviewRow label="Remaining Hours" value={`${form.remainingHours} hrs`} />
-          <ReviewRow label="Start Date" value={form.startDate} />
-          <ReviewRow label="Due Date" value={form.dueDate} />
+          <ReviewRow label="Story Points" value={`${form.storyPoints} SP`} />
+          <ReviewRow label="Start Date" value={form.startDate || "—"} />
+          <ReviewRow label="Due Date" value={form.dueDate || "—"} />
           <ReviewRow label="Duration" value={`${duration} Working Days`} />
-          <ReviewRow label="Dependency" value={form.dependency} />
+          <ReviewRow label="Blocked By" value={form.blockedBy || "None"} />
+          <ReviewRow label="Category" value={form.category} />
           <ReviewRow label="Risk" value={form.risk} />
-          <ReviewRow label="Planned In" value={form.plannedIn} />
+          <ReviewRow label="Labels" value={form.labels.join(", ") || "—"} />
         </div>
       </div>
 
@@ -876,14 +1024,11 @@ export default function CreateTaskWizard() {
           <div className="ctw-success-icon"><CheckCircle2 size={31} /></div>
           <div>
             <h2>Task Created Successfully!</h2>
-            <p>Task ID: <strong>{taskId}</strong></p>
+            <p>Task ID: <strong>{taskId}</strong> — saved to MongoDB.</p>
           </div>
           <div className="ctw-success-actions">
-            <button type="button" onClick={() => {
-              setSuccess(false);
-              showToast(`Open task details for ${taskId} after connecting the task detail route.`);
-            }}>
-              <Eye size={15} /> View Task
+            <button type="button" onClick={() => router.push("/tasks/kanban")}>
+              <Eye size={15} /> Open Kanban Board
             </button>
             <button type="button" className="primary" onClick={resetWizard}>
               <Plus size={15} /> Add Another Task
@@ -893,11 +1038,11 @@ export default function CreateTaskWizard() {
         <div className="ctw-after-create">
           <b>After creation, you can:</b>
           <ul>
-            <li>View the task details</li>
-            <li>Create another task</li>
-            <li>Return to Task Registry</li>
+            <li>Track and move the task on the Kanban Board</li>
+            <li>Create another task for your sprint</li>
+            <li>View all tasks in the Task Registry</li>
           </ul>
-          <button type="button" onClick={() => window.location.href = "/tasks"}>
+          <button type="button" onClick={() => router.push("/tasks")}>
             Return to Task Registry
           </button>
         </div>
@@ -913,14 +1058,14 @@ export default function CreateTaskWizard() {
           <div className="ctw-heading-row">
             <div className="ctw-heading-icon"><ClipboardList size={20} /></div>
             <div>
-              <h1>Create New Task</h1>
-              <p>Create and schedule a task for your project team.</p>
+              <h1>Create New Task ({taskId})</h1>
+              <p>Create, link, and schedule a task for your project sprint.</p>
             </div>
           </div>
         </div>
         <div className="ctw-top-actions">
           <button type="button" onClick={saveDraft}><FileText size={15} /> Save as Draft</button>
-          <button type="button" onClick={() => window.location.href = "/tasks"}><X size={15} /> Cancel</button>
+          <button type="button" onClick={() => router.push("/tasks")}><X size={15} /> Cancel</button>
         </div>
       </div>
 
@@ -933,10 +1078,10 @@ export default function CreateTaskWizard() {
             <p>
               {[
                 "Fill in the basic details to create a new task.",
-                "Add description, acceptance criteria and task dependencies.",
-                "Set effort, dates, calendar and scheduling preferences.",
-                "Upload relevant files and add reference links.",
-                "Review all task details before creating the task.",
+                "Add description, acceptance criteria, and task dependencies.",
+                "Set effort, story points, dates, and scheduling preferences.",
+                "Attach relevant files and add design/API reference links.",
+                "Review all task details before persisting to database.",
               ][step]}
             </p>
           </div>
@@ -958,12 +1103,7 @@ export default function CreateTaskWizard() {
         </div>
 
         <div className="ctw-form-footer">
-          <button
-            type="button"
-            className="ctw-back"
-            onClick={back}
-            disabled={step === 0}
-          >
+          <button type="button" className="ctw-back" onClick={back} disabled={step === 0}>
             <ArrowLeft size={15} /> Back
           </button>
           <div className="ctw-footer-right">
@@ -974,8 +1114,9 @@ export default function CreateTaskWizard() {
                 Next: {steps[step + 1]} <ArrowRight size={15} />
               </button>
             ) : (
-              <button type="button" className="ctw-submit" onClick={createTask}>
-                <CheckCircle2 size={15} /> Create Task
+              <button type="button" className="ctw-submit" onClick={createTask} disabled={submitting}>
+                {submitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                {submitting ? "Creating..." : "Create Task"}
               </button>
             )}
           </div>

@@ -1,39 +1,56 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
+  ArrowRight,
+  Bold,
+  CalendarCheck2,
   CalendarDays,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CirclePlus,
   Clock3,
+  Code2,
   FileText,
   Flag,
+  Italic,
+  Link2,
+  List,
+  ListOrdered,
+  Loader2,
   Plus,
+  Save,
   ShieldCheck,
   Target,
-  Trash2,
-  UserRound,
+  Underline,
   X,
-  Loader2,
 } from "lucide-react";
 import "./create-sprint.css";
-import { createSprint as apiCreateSprint, milestones as fetchMilestones, projects } from "../../lib/api";
+import {
+  milestones as fetchMilestones,
+  projects as getProjectsApi,
+  requirements as getRequirementsApi,
+  tasks as getTasksApi,
+  employees as getEmployeesApi,
+} from "../../lib/api";
+import { getStoredUser } from "../../lib/auth";
+import { sprintApi } from "../../lib/sprints/api";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
-type Requirement = {
+type BacklogItem = {
   id: string;
+  rawId?: string;
   name: string;
   points: number;
 };
 
-type Task = {
+type PersonnelItem = {
   id: string;
   name: string;
-  points: number;
+  email?: string;
+  role?: string;
 };
 
 const steps = [
@@ -44,36 +61,17 @@ const steps = [
   "Review & Confirm",
 ];
 
-const requirements: Requirement[] = [
-  { id: "REQ-045", name: "Patient Registration", points: 8 },
-  { id: "REQ-047", name: "Patient Profile Management", points: 5 },
-  { id: "REQ-048", name: "Patient Search & Filter", points: 3 },
-  { id: "REQ-049", name: "Patient Document Upload", points: 5 },
-  { id: "REQ-050", name: "Patient Appointment History", points: 5 },
-];
-
-const tasks: Task[] = [
-  { id: "TASK-201", name: "Design Registration UI", points: 3 },
-  { id: "TASK-202", name: "Create Registration API", points: 5 },
-  { id: "TASK-203", name: "Add Patient Validation", points: 3 },
-  { id: "TASK-204", name: "Write Unit Tests", points: 2 },
-];
-
-const team = [
-  { name: "Amit Kumar", role: "Project Manager", initials: "AK" },
-  { name: "Vikram Singh", role: "Tech Lead", initials: "VS" },
-  { name: "Neha Patel", role: "Business Analyst", initials: "NP" },
-  { name: "Rahul Verma", role: "Developer", initials: "RV" },
-  { name: "Pooja Singh", role: "QA Engineer", initials: "PS" },
-];
-
 const dateLabel = (value: string) => {
   if (!value) return "—";
-  return new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  try {
+    return new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return value;
+  }
 };
 
 function Field({
@@ -98,35 +96,54 @@ function Field({
 function SelectField({
   value,
   onChange,
+  leading,
   children,
 }: {
   value: string;
   onChange: (value: string) => void;
+  leading?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="cs-select-wrap">
+      {leading}
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {children}
       </select>
-      <ChevronDown size={13} />
+      <ChevronDown size={14} />
     </div>
   );
 }
 
-function Avatar({ name }: { name: string }) {
-  const initials = name
+function Avatar({ name, small }: { name: string; small?: boolean }) {
+  const safe = (name || "U").trim();
+  const initials = safe
     .split(" ")
     .map((part) => part[0])
+    .filter(Boolean)
     .join("")
-    .slice(0, 2);
+    .slice(0, 2)
+    .toUpperCase();
 
-  return <span className="cs-avatar">{initials}</span>;
+  return <span className={`cs-avatar ${small ? "cs-avatar-sm" : ""}`}>{initials || "U"}</span>;
 }
 
 export default function CreateSprint() {
+  const router = useRouter();
+  const descRef = useRef<HTMLTextAreaElement>(null);
   const [step, setStep] = useState<Step>(1);
+
+  // Dynamic lists from DB
   const [projectList, setProjectList] = useState<any[]>([]);
+  const [milestoneList, setMilestoneList] = useState<any[]>([]);
+  const [requirementsList, setRequirementsList] = useState<BacklogItem[]>([]);
+  const [tasksList, setTasksList] = useState<BacklogItem[]>([]);
+  const [existingSprints, setExistingSprints] = useState<any[]>([]);
+  const [team, setTeam] = useState<PersonnelItem[]>([]);
+  const [createdByName, setCreatedByName] = useState("PH PMS Admin");
+  const [createdOnText, setCreatedOnText] = useState("");
+
+  const [createdSprintId, setCreatedSprintId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState("");
 
@@ -134,7 +151,7 @@ export default function CreateSprint() {
   const [project, setProject] = useState("");
   const [milestone, setMilestone] = useState("");
   const [name, setName] = useState("");
-  const [code, setCode] = useState(`SPR-${String(Math.floor(100 + Math.random() * 900))}`);
+  const [code, setCode] = useState("SPR-0001");
   const [sprintType, setSprintType] = useState("Development");
   const [priority, setPriority] = useState("High");
   const [businessValue, setBusinessValue] = useState("High");
@@ -143,9 +160,10 @@ export default function CreateSprint() {
   const [coOwners, setCoOwners] = useState<string[]>([]);
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const [addingTag, setAddingTag] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [requirementLink, setRequirementLink] = useState("");
-  const [dependency, setDependency] = useState("");
+  const [dependency, setDependency] = useState("None");
   const [sprintColor, setSprintColor] = useState("#2563EB");
 
   // Sprint goal
@@ -153,53 +171,167 @@ export default function CreateSprint() {
   const [outcomes, setOutcomes] = useState("");
   const [definition, setDefinition] = useState("");
 
-  useEffect(() => {
-    projects().then((res) => {
-      if (Array.isArray(res) && res.length > 0) {
-        setProjectList(res);
-        setProject(res[0].projectName || res[0].name || "");
-      }
-    }).catch((err) => console.warn("Failed to load projects for sprint:", err));
-  }, []);
-
-  // Backlog
-  const [selectedRequirements, setSelectedRequirements] = useState([
-    "REQ-045",
-    "REQ-047",
-    "REQ-048",
-  ]);
-  const [selectedTasks, setSelectedTasks] = useState(["TASK-201"]);
+  // Backlog selections
+  const [selectedRequirements, setSelectedRequirements] = useState<string[]>([]);
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [requirementSearch, setRequirementSearch] = useState("");
   const [taskSearch, setTaskSearch] = useState("");
 
   // Schedule
-  const [startDate, setStartDate] = useState("2025-05-19");
-  const [endDate, setEndDate] = useState("2025-06-01");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [dailyHours, setDailyHours] = useState("8");
   const [standupTime, setStandupTime] = useState("09:30");
   const [timezone, setTimezone] = useState("(GMT+05:30) India Standard Time");
-  const [workingDays, setWorkingDays] = useState([
-    "Mon",
-    "Tue",
-    "Wed",
-    "Thu",
-    "Fri",
-  ]);
+  const [workingDays, setWorkingDays] = useState(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 
   const [savedDraft, setSavedDraft] = useState(false);
   const [created, setCreated] = useState(false);
-  const [showOwnerMenu, setShowOwnerMenu] = useState(false);
 
-  const selectedRequirementRows = requirements.filter((r) =>
+  // Initial load from DB
+  useEffect(() => {
+    const user = getStoredUser();
+    if (user?.name) setCreatedByName(user.name);
+    setCreatedOnText(
+      new Date().toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    );
+
+    async function initForm() {
+      const [codeRes, pRes, rRes, tRes, sRes, personnelRes, empRes] = await Promise.allSettled([
+        sprintApi.getNextCode(),
+        getProjectsApi({ limit: 100 }),
+        getRequirementsApi({ limit: 100 }),
+        getTasksApi({ limit: 100 }),
+        sprintApi.list({ limit: 100 }),
+        sprintApi.getPersonnel(),
+        getEmployeesApi({ limit: 100 }).catch(() => []),
+      ]);
+
+      if (codeRes.status === "fulfilled" && codeRes.value?.nextCode) {
+        setCode(codeRes.value.nextCode);
+      }
+
+      if (pRes.status === "fulfilled") {
+        const raw = pRes.value;
+        const list = Array.isArray(raw) ? raw : (raw as any)?.data || (raw as any)?.items || [];
+        setProjectList(list);
+        if (list.length > 0) {
+          setProject(list[0]._id || list[0].id);
+        }
+      }
+
+      if (rRes.status === "fulfilled") {
+        const raw = rRes.value;
+        const list = Array.isArray(raw) ? raw : (raw as any)?.data || (raw as any)?.items || [];
+        const mapped: BacklogItem[] = list.map((r: any) => ({
+          id: r.requirementId || r.reqId || r.requirementCode || r.code || `REQ-${String(r._id || r.id).slice(-4).toUpperCase()}`,
+          rawId: r._id || r.id,
+          name: r.title || "Requirement",
+          points: Number(r.storyPoints || r.points || 5),
+        }));
+        setRequirementsList(mapped);
+        if (mapped.length > 0) {
+          setRequirementLink(`${mapped[0].id} - ${mapped[0].name}`);
+        }
+      }
+
+      if (tRes.status === "fulfilled") {
+        const raw = tRes.value;
+        const list = Array.isArray(raw) ? raw : (raw as any)?.data || (raw as any)?.items || [];
+        const mapped: BacklogItem[] = list.map((t: any) => ({
+          id: t.taskId || t.code || `TSK-${String(t._id || t.id).slice(-4).toUpperCase()}`,
+          rawId: t._id || t.id,
+          name: t.title || "Engineering Task",
+          points: Number(t.storyPoints || (t.estimatedHours ? Math.max(1, Math.round(t.estimatedHours / 4)) : 3)),
+        }));
+        setTasksList(mapped);
+      }
+
+      if (sRes.status === "fulfilled") {
+        setExistingSprints(sRes.value.items || []);
+      }
+
+      // Build rich personnel list with role/designation
+      const empByName = new Map<string, string>();
+      if (empRes.status === "fulfilled") {
+        const rawE: any = empRes.value;
+        const eList = Array.isArray(rawE) ? rawE : rawE?.data || rawE?.items || [];
+        eList.forEach((e: any) => {
+          const full = e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.name;
+          const role = e.designation?.name || e.designation || e.role || e.department?.name || "";
+          if (full && role) empByName.set(full.toLowerCase(), String(role));
+        });
+      }
+
+      if (personnelRes.status === "fulfilled" && personnelRes.value.length > 0) {
+        const enriched: PersonnelItem[] = personnelRes.value.map((p) => ({
+          ...p,
+          role: empByName.get(p.name.toLowerCase()) || p.email || "Team Member",
+        }));
+        setTeam(enriched);
+        setOwner(enriched[0].name);
+      }
+    }
+    initForm();
+  }, []);
+
+  // Load milestones for selected project
+  useEffect(() => {
+    if (!project) return;
+    fetchMilestones(project)
+      .then((res) => {
+        const list = Array.isArray(res) ? res : (res as any)?.data || (res as any)?.items || [];
+        setMilestoneList(list);
+        if (list.length > 0) {
+          setMilestone(list[0]._id || list[0].id);
+        } else {
+          setMilestone("");
+        }
+      })
+      .catch(() => {
+        setMilestoneList([]);
+        setMilestone("");
+      });
+  }, [project]);
+
+  const selectedProjectObj = useMemo(
+    () => projectList.find((p) => (p._id || p.id) === project),
+    [projectList, project]
+  );
+
+  const selectedMilestoneObj = useMemo(
+    () => milestoneList.find((m) => (m._id || m.id) === milestone),
+    [milestoneList, milestone]
+  );
+
+  const ownerObj = useMemo(
+    () => team.find((p) => p.name === owner),
+    [team, owner]
+  );
+
+  const projectDisplay = selectedProjectObj
+    ? `${selectedProjectObj.projectCode ? `${selectedProjectObj.projectCode} - ` : ""}${selectedProjectObj.projectName || selectedProjectObj.name}`
+    : "—";
+
+  const milestoneDisplay = selectedMilestoneObj
+    ? `${selectedMilestoneObj.milestoneCode ? `${selectedMilestoneObj.milestoneCode} - ` : ""}${selectedMilestoneObj.title || selectedMilestoneObj.name}`
+    : "—";
+
+  const selectedRequirementRows = requirementsList.filter((r) =>
     selectedRequirements.includes(r.id)
   );
+  const selectedTaskRows = tasksList.filter((t) => selectedTasks.includes(t.id));
 
-  const selectedTaskRows = tasks.filter((t) => selectedTasks.includes(t.id));
-
-  const totalPoints = selectedRequirementRows.reduce(
-    (sum, item) => sum + item.points,
-    0
-  );
+  const totalPoints =
+    selectedRequirementRows.reduce((sum, item) => sum + item.points, 0) +
+    selectedTaskRows.reduce((sum, item) => sum + item.points, 0);
 
   const totalTasks = selectedTaskRows.length;
 
@@ -226,8 +358,23 @@ export default function CreateSprint() {
     return count;
   }, [startDate, endDate, workingDays]);
 
-  const totalCapacity = team.length * workingDayCount * Number(dailyHours || 0);
-  const dailyCapacity = team.length * Number(dailyHours || 0);
+  const memberCount = Math.max(1, team.length);
+  const effectiveWorkingDays = workingDayCount || 10;
+  const totalCapacity = memberCount * effectiveWorkingDays * Number(dailyHours || 0);
+  const dailyCapacity = memberCount * Number(dailyHours || 0);
+
+  const roleBreakdown = useMemo(() => {
+    const groups = new Map<string, number>();
+    team.forEach((m) => {
+      const r = m.role && !m.role.includes("@") ? m.role : "Team Members";
+      groups.set(r, (groups.get(r) || 0) + 1);
+    });
+    return Array.from(groups.entries()).map(([role, count]) => ({
+      role,
+      count,
+      hours: count * effectiveWorkingDays * Number(dailyHours || 0),
+    }));
+  }, [team, effectiveWorkingDays, dailyHours]);
 
   const toggleItem = (
     id: string,
@@ -245,25 +392,54 @@ export default function CreateSprint() {
     const clean = tagInput.trim();
     if (clean && !tags.includes(clean)) setTags((prev) => [...prev, clean]);
     setTagInput("");
+    setAddingTag(false);
   };
 
   const toggleWorkingDay = (day: string) => {
     setWorkingDays((prev) =>
-      prev.includes(day)
-        ? prev.filter((d) => d !== day)
-        : [...prev, day]
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
     );
   };
 
   const toggleCoOwner = (person: string) => {
     setCoOwners((prev) =>
-      prev.includes(person)
-        ? prev.filter((p) => p !== person)
-        : [...prev, person]
+      prev.includes(person) ? prev.filter((p) => p !== person) : [...prev, person]
     );
   };
 
+  const applyFormat = (wrapper: string, suffix = wrapper) => {
+    const el = descRef.current;
+    if (!el) {
+      setDescription((prev) => `${prev}${wrapper}`);
+      return;
+    }
+    const start = el.selectionStart || 0;
+    const end = el.selectionEnd || 0;
+    const selected = description.slice(start, end) || "text";
+    const next = `${description.slice(0, start)}${wrapper}${selected}${suffix}${description.slice(end)}`;
+    setDescription(next.slice(0, 1000));
+    window.setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(start + wrapper.length, start + wrapper.length + selected.length);
+    }, 0);
+  };
+
+  const canContinue = () => {
+    if (step === 1) return Boolean(project && name.trim() && code.trim());
+    if (step === 2) return Boolean(goal.trim() || name.trim());
+    if (step === 4) return Boolean(startDate && endDate && duration > 0);
+    return true;
+  };
+
   const nextStep = () => {
+    // Initialize default dates when entering Schedule step if not set yet
+    if (step === 3 && !startDate) {
+      const today = new Date();
+      const end = new Date();
+      end.setDate(today.getDate() + 13);
+      setStartDate(today.toISOString().slice(0, 10));
+      setEndDate(end.toISOString().slice(0, 10));
+    }
     if (step < 5) setStep((step + 1) as Step);
   };
 
@@ -272,39 +448,26 @@ export default function CreateSprint() {
   };
 
   const saveDraft = () => {
-    const draft = {
-      project,
-      milestone,
-      name,
-      code,
-      sprintType,
-      priority,
-      businessValue,
-      category,
-      owner,
-      coOwners,
-      description,
-      tags,
-      goal,
-      outcomes,
-      definition,
-      selectedRequirements,
-      selectedTasks,
-      startDate,
-      endDate,
-      dailyHours,
-      standupTime,
-      timezone,
-      workingDays,
-      step,
-    };
-
     try {
-      localStorage.setItem("ph-pms-sprint-draft", JSON.stringify(draft));
+      localStorage.setItem(
+        "ph-pms-sprint-draft",
+        JSON.stringify({
+          project,
+          milestone,
+          name,
+          code,
+          sprintType,
+          priority,
+          owner,
+          goal,
+          startDate,
+          endDate,
+        })
+      );
       setSavedDraft(true);
       window.setTimeout(() => setSavedDraft(false), 2500);
     } catch {
-      alert("Draft could not be saved in this browser.");
+      // ignore storage errors
     }
   };
 
@@ -313,54 +476,82 @@ export default function CreateSprint() {
     setSubmitting(true);
     setApiError("");
     try {
-      const selProject = projectList.find(
-        (p) => (p.projectName || p.name) === project || (p._id || p.id) === project
-      );
+      const matchedOwner = team.find((p) => p.name === owner);
+      const safeStart = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
+      const safeEnd = endDate ? new Date(`${endDate}T00:00:00`) : new Date(safeStart.getTime() + 13 * 86400000);
+
       const payload: any = {
         name: name.trim(),
+        sprintCode: code.trim(),
         goal: goal.trim() || name.trim(),
-        startDate: startDate ? new Date(startDate).toISOString() : new Date().toISOString(),
-        endDate: endDate ? new Date(endDate).toISOString() : new Date(Date.now() + 14 * 86400000).toISOString(),
+        description: description.trim(),
+        outcomes: outcomes.trim(),
+        definitionOfDone: definition.trim(),
+        startDate: safeStart.toISOString(),
+        endDate: safeEnd.toISOString(),
         status: "PLANNED",
-        projectId: selProject?._id || selProject?.id,
-        milestoneId: selProject?._id || undefined,
+        projectId: project,
+        milestoneId: milestone || undefined,
+        ownerId: matchedOwner?.id || undefined,
+        ownerName: owner || matchedOwner?.name || createdByName,
+        type: sprintType,
+        category,
+        businessValue,
+        tags,
+        sprintColor,
+        durationDays: duration || 14,
+        capacity: totalCapacity || 40,
+        plannedStoryPoints: totalPoints || 0,
+        priority: priority || "Medium",
+        planning: {
+          selectedIds: [...selectedRequirements, ...selectedTasks],
+          workingDays,
+          standupTime,
+          timeZone: timezone,
+          dailyHours: Number(dailyHours || 8),
+          coOwners,
+          linkedRequirement: requirementLink,
+          predecessorSprint: dependency,
+        },
       };
 
-      if (payload.projectId) {
-        await apiCreateSprint(payload).catch((err) => {
-          console.warn("Sprint created with fallback:", err);
-        });
-      }
+      const res = await sprintApi.create(payload);
+      const newId = res?._id || res?.id || code;
+      setCreatedSprintId(newId);
       setCreated(true);
     } catch (err: any) {
-      setApiError(err.message || "Failed to create sprint.");
+      console.error("Failed to create sprint:", err);
+      setApiError(err?.message || "Failed to create sprint. Please verify dates and project selection.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const canContinue = () => {
-    if (step === 1) return Boolean(project && milestone && name.trim() && code.trim());
-    if (step === 2) return Boolean(goal.trim());
-    if (step === 3) return selectedRequirements.length > 0;
-    if (step === 4) return Boolean(startDate && endDate && duration > 0);
-    return true;
-  };
-
   if (created) {
     return (
       <div className="cs-page">
-        <div className="cs-success">
-          <div><Check size={34} /></div>
-          <h1>Sprint Ready for Creation</h1>
+        <div className="cs-success-card">
+          <div className="cs-success-icon"><Check size={28} /></div>
+          <h1>Sprint Created Successfully!</h1>
           <p>
-            {code} — {name} has passed the review step.
+            <strong>{code} — {name}</strong> has been registered in the PMS database for <strong>{projectDisplay}</strong>.
           </p>
-          <p className="cs-success-note">
-            This is a frontend preview. Connect the sprint creation API to save
-            this sprint permanently.
-          </p>
-          <button onClick={() => setCreated(false)}>Back to Review</button>
+          <div className="cs-success-actions">
+            <button
+              type="button"
+              className="cs-btn cs-btn-outline-blue"
+              onClick={() => router.push("/sprints")}
+            >
+              Go to Sprint Registry
+            </button>
+            <button
+              type="button"
+              className="cs-btn cs-btn-primary"
+              onClick={() => router.push(`/sprints/${encodeURIComponent(createdSprintId)}/planning`)}
+            >
+              Open Sprint Planning
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -368,428 +559,864 @@ export default function CreateSprint() {
 
   return (
     <div className="cs-page">
+      {/* Top Breadcrumb & Header Action Bar (Exact match to SPR-002) */}
       <header className="cs-header">
         <div className="cs-breadcrumb">
-          <span>Sprint Management</span>
+          <span onClick={() => router.push("/sprints")}>Sprint Management</span>
           <b>›</b>
-          <span>Sprint Registry</span>
+          <span onClick={() => router.push("/sprints")}>Sprint Registry</span>
           <b>›</b>
-          <strong>Create Sprint ({code || "SPR-002"})</strong>
+          <strong>Create Sprint ({code})</strong>
         </div>
 
         <div className="cs-header-actions">
-          <button onClick={saveDraft}>
-            <FileText size={13} /> {savedDraft ? "Draft Saved" : "Save as Draft"}
+          <button type="button" className="cs-btn cs-btn-outline-blue" onClick={saveDraft}>
+            <Save size={14} />
+            {savedDraft ? "Draft Saved ✓" : "Save as Draft"}
           </button>
-          <button onClick={() => window.history.back()}>
-            <X size={13} /> Cancel
+          <button type="button" className="cs-btn" onClick={() => router.push("/sprints")}>
+            <X size={14} />
+            Cancel
           </button>
-          <button className="primary" onClick={nextStep} disabled={step === 5}>
-            Next: {step < 5 ? steps[step] : "Complete"} <ChevronRight size={13} />
-          </button>
+          {step < 5 ? (
+            <button
+              type="button"
+              className="cs-btn cs-btn-primary"
+              disabled={!canContinue()}
+              onClick={nextStep}
+            >
+              Next: {steps[step]}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cs-btn cs-btn-success"
+              disabled={submitting}
+              onClick={createSprint}
+            >
+              {submitting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              {submitting ? "Creating..." : "Create Sprint"}
+            </button>
+          )}
         </div>
       </header>
 
-      <div className="cs-title">
-        <div className="cs-title-icon"><FileText size={21} /></div>
+      {/* Title Row */}
+      <div className="cs-title-row">
+        <div className="cs-title-icon">
+          <CalendarCheck2 size={22} strokeWidth={1.8} />
+        </div>
         <div>
-          <h1>Create Sprint ({code || "SPR-002"})</h1>
+          <h1>Create Sprint ({code})</h1>
           <p>Fill in the basic details to create a new sprint</p>
         </div>
       </div>
 
-      <nav className="cs-stepper" aria-label="Sprint creation steps">
+      {/* 5-Step Horizontal Stepper */}
+      <nav className="cs-stepper" aria-label="Create sprint steps">
         {steps.map((label, index) => {
-          const number = index + 1;
-          const active = step === number;
-          const completed = step > number;
-
+          const stepNum = (index + 1) as Step;
+          const active = step === stepNum;
+          const done = step > stepNum;
           return (
             <button
+              type="button"
               key={label}
-              className={`${active ? "active" : ""} ${completed ? "completed" : ""}`}
-              onClick={() => setStep(number as Step)}
+              className={`cs-step ${active ? "active" : ""} ${done ? "done" : ""}`}
+              onClick={() => {
+                if (stepNum < step) {
+                  setStep(stepNum);
+                } else if (stepNum === step + 1 && canContinue()) {
+                  nextStep();
+                }
+              }}
             >
-              <i>{completed ? <Check size={13} /> : number}</i>
-              <span>{label}</span>
-              {number < 5 && <b />}
+              <span>{done ? <Check size={13} strokeWidth={2.5} /> : stepNum}</span>
+              <b>{label}</b>
             </button>
           );
         })}
       </nav>
 
-      <div className="cs-content-grid">
-        <main className="cs-main-card">
-          {step === 1 && (
-            <section>
-              <h2>Basic Information</h2>
+      {apiError && <div className="cs-error-banner">{apiError}</div>}
 
-              <div className="cs-form-columns">
-                <div className="cs-form-column">
-                  <Field label="Project" required>
-                    <SelectField value={project} onChange={setProject}>
-                      <option>PRJ-001 - AI-CMS Platform</option>
-                      <option>PRJ-002 - Healthcare Integration</option>
-                      <option>PRJ-003 - Mobile Application</option>
-                    </SelectField>
-                  </Field>
+      {/* Main 2-Column Content */}
+      <div className="cs-layout">
+        <div className="cs-left-col">
+          <main className="cs-main-card">
+            {step === 1 && (
+              <section>
+                <h2>Basic Information</h2>
 
-                  <Field label="Milestone" required>
-                    <SelectField value={milestone} onChange={setMilestone}>
-                      <option>MLS-002 - Module Development</option>
-                      <option>MLS-001 - Project Kickoff</option>
-                      <option>MLS-003 - Design Completion</option>
-                      <option>MLS-004 - Internal QA</option>
-                    </SelectField>
-                  </Field>
+                <div className="cs-form-columns">
+                  {/* Left Column */}
+                  <div className="cs-form-column">
+                    <Field label="Project" required>
+                      <SelectField value={project} onChange={setProject}>
+                        {projectList.length === 0 ? (
+                          <option value="">No Active Projects Found</option>
+                        ) : (
+                          projectList.map((p) => (
+                            <option key={p._id || p.id} value={p._id || p.id}>
+                              {p.projectCode ? `${p.projectCode} - ` : ""}{p.projectName || p.name}
+                            </option>
+                          ))
+                        )}
+                      </SelectField>
+                    </Field>
 
-                  <Field label="Sprint Name" required>
-                    <input value={name} onChange={(e) => setName(e.target.value)} />
-                  </Field>
-
-                  <Field label="Sprint Code / ID" required>
-                    <input value={code} onChange={(e) => setCode(e.target.value)} />
-                    <small className="cs-hint">Auto-generated code. You can modify if required.</small>
-                  </Field>
-
-                  <Field label="Sprint Type" required>
-                    <SelectField value={sprintType} onChange={setSprintType}>
-                      <option>Development</option>
-                      <option>Bug Fix</option>
-                      <option>Research</option>
-                      <option>Maintenance</option>
-                      <option>Testing</option>
-                    </SelectField>
-                  </Field>
-
-                  <Field label="Sprint Owner" required>
-                    <SelectField value={owner} onChange={setOwner}>
-                      {team.map((person) => <option key={person.name}>{person.name}</option>)}
-                    </SelectField>
-                  </Field>
-
-                  <Field label="Co-Sprint Owners">
-                    <div className="cs-chip-select">
-                      {coOwners.map((person) => (
-                        <span key={person}>
-                          <Avatar name={person} />
-                          {person}
-                          <button onClick={() => toggleCoOwner(person)} type="button"><X size={11} /></button>
-                        </span>
-                      ))}
-                      <select
-                        value=""
-                        onChange={(e) => e.target.value && toggleCoOwner(e.target.value)}
-                      >
-                        <option value="">Add owner</option>
-                        {team.filter((p) => !coOwners.includes(p.name)).map((p) => (
-                          <option key={p.name} value={p.name}>{p.name}</option>
+                    <Field label="Milestone" required>
+                      <SelectField value={milestone} onChange={setMilestone}>
+                        <option value="">-- No Milestone / Independent Sprint --</option>
+                        {milestoneList.map((m) => (
+                          <option key={m._id || m.id} value={m._id || m.id}>
+                            {m.milestoneCode ? `${m.milestoneCode} - ` : ""}{m.title || m.name}
+                          </option>
                         ))}
-                      </select>
-                    </div>
-                  </Field>
+                      </SelectField>
+                    </Field>
 
-                  <Field label="Sprint Description">
-                    <textarea
-                      rows={4}
-                      maxLength={1000}
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                    />
-                    <small className="cs-counter">{description.length} / 1000</small>
-                  </Field>
-                </div>
+                    <Field label="Sprint Name" required>
+                      <input
+                        className="cs-input"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="e.g. Patient Management Sprint"
+                      />
+                    </Field>
 
-                <div className="cs-form-column">
-                  <Field label="Priority" required>
-                    <SelectField value={priority} onChange={setPriority}>
-                      <option>High</option><option>Medium</option><option>Low</option><option>Critical</option>
-                    </SelectField>
-                  </Field>
-
-                  <Field label="Business Value">
-                    <SelectField value={businessValue} onChange={setBusinessValue}>
-                      <option>High</option><option>Medium</option><option>Low</option>
-                    </SelectField>
-                  </Field>
-
-                  <Field label="Sprint Category">
-                    <SelectField value={category} onChange={setCategory}>
-                      <option>Feature Development</option>
-                      <option>Technical Improvement</option>
-                      <option>Bug Fixing</option>
-                      <option>Infrastructure</option>
-                    </SelectField>
-                  </Field>
-
-                  <Field label="Tags">
-                    <div className="cs-tags">
-                      {tags.map((tag) => (
-                        <span key={tag}>{tag}<button type="button" onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}><X size={10} /></button></span>
-                      ))}
-                      <div className="cs-tag-input">
+                    <Field label="Sprint Code / ID" required>
+                      <div className="cs-code-inline">
                         <input
-                          value={tagInput}
-                          onChange={(e) => setTagInput(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTag())}
-                          placeholder="Add tag"
+                          className="cs-input"
+                          value={code}
+                          onChange={(e) => setCode(e.target.value)}
                         />
-                        <button type="button" onClick={addTag}><Plus size={12} /></button>
+                        <span className="cs-code-hint">
+                          Auto-generated code. You can modify if required.
+                        </span>
                       </div>
+                    </Field>
+
+                    <div className="cs-two-col">
+                      <Field label="Sprint Type" required>
+                        <SelectField value={sprintType} onChange={setSprintType}>
+                          <option>Development</option>
+                          <option>Bug Fix</option>
+                          <option>Research</option>
+                          <option>Maintenance</option>
+                          <option>Testing</option>
+                        </SelectField>
+                      </Field>
+
+                      <Field label="Sprint Owner" required>
+                        <div className="cs-owner-box">
+                          <div className="cs-owner-pill">
+                            <Avatar name={owner || "U"} />
+                            <div className="cs-owner-meta">
+                              <strong>{owner || "Select Owner"}</strong>
+                              <small>{ownerObj?.role || "Sprint Lead"}</small>
+                            </div>
+                          </div>
+                          <select
+                            className="cs-owner-overlay-select"
+                            aria-label="Select Sprint Owner"
+                            value={owner}
+                            onChange={(e) => setOwner(e.target.value)}
+                          >
+                            {team.length === 0 && <option value="">Loading...</option>}
+                            {team.map((person) => (
+                              <option key={person.id} value={person.name}>
+                                {person.name}
+                              </option>
+                            ))}
+                          </select>
+                          {owner && (
+                            <button
+                              type="button"
+                              className="cs-owner-clear"
+                              title="Clear owner"
+                              onClick={() => setOwner("")}
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </Field>
                     </div>
-                  </Field>
 
-                  <Field label="Linked Requirement (Optional)">
-                    <div className="cs-linked-field">
-                      <select value={requirementLink} onChange={(e) => setRequirementLink(e.target.value)}>
-                        <option>REQ-045 - Patient Registration</option>
-                        <option>REQ-047 - Patient Profile Management</option>
-                        <option>REQ-048 - Patient Search & Filter</option>
-                      </select>
-                      <button type="button" onClick={() => setStep(3)}>+ Add Requirement</button>
+                    <Field label="Co-Sprint Owners">
+                      <div className="cs-coowners-box">
+                        <div className="cs-coowners-chips">
+                          {coOwners.map((personName) => {
+                            const info = team.find((p) => p.name === personName);
+                            return (
+                              <span className="cs-person-chip" key={personName}>
+                                <Avatar name={personName} />
+                                <div className="cs-owner-meta">
+                                  <strong>{personName}</strong>
+                                  <small>{info?.role || "Co-Owner"}</small>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCoOwner(personName)}
+                                  aria-label={`Remove ${personName}`}
+                                >
+                                  <X size={12} />
+                                </button>
+                              </span>
+                            );
+                          })}
+                          {coOwners.length === 0 && (
+                            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: 400 }}>
+                              Select co-sprint owners...
+                            </span>
+                          )}
+                        </div>
+                        <div className="cs-coowner-add">
+                          <select
+                            aria-label="Add co-sprint owner"
+                            value=""
+                            onChange={(e) => e.target.value && toggleCoOwner(e.target.value)}
+                          >
+                            <option value="">+ Add</option>
+                            {team
+                              .filter((p) => !coOwners.includes(p.name) && p.name !== owner)
+                              .map((p) => (
+                                <option key={p.id} value={p.name}>{p.name}</option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+                    </Field>
+
+                    <Field label="Sprint Description">
+                      <div className="cs-editor-box">
+                        <div className="cs-editor-toolbar">
+                          <select aria-label="Text style" defaultValue="Normal">
+                            <option value="Normal">Normal</option>
+                            <option value="Heading">Heading</option>
+                          </select>
+                          <span className="cs-editor-divider" />
+                          <button type="button" title="Bold" onClick={() => applyFormat("**")}>
+                            <Bold size={13} />
+                          </button>
+                          <button type="button" title="Italic" onClick={() => applyFormat("_")}>
+                            <Italic size={13} />
+                          </button>
+                          <button type="button" title="Underline" onClick={() => applyFormat("__")}>
+                            <Underline size={13} />
+                          </button>
+                          <span className="cs-editor-divider" />
+                          <button type="button" title="Bullet list" onClick={() => applyFormat("\n• ", "")}>
+                            <List size={13} />
+                          </button>
+                          <button type="button" title="Numbered list" onClick={() => applyFormat("\n1. ", "")}>
+                            <ListOrdered size={13} />
+                          </button>
+                          <span className="cs-editor-divider" />
+                          <button type="button" title="Link" onClick={() => applyFormat("[", "](https://)")}>
+                            <Link2 size={13} />
+                          </button>
+                          <button type="button" title="Code" onClick={() => applyFormat("`")}>
+                            <Code2 size={13} />
+                          </button>
+                        </div>
+                        <div className="cs-editor-body">
+                          <textarea
+                            ref={descRef}
+                            className="cs-textarea"
+                            rows={4}
+                            maxLength={1000}
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            placeholder="Describe the focus, core modules, and deliverables for this sprint..."
+                          />
+                          <span className="cs-inside-counter">{description.length} / 1000</span>
+                        </div>
+                      </div>
+                    </Field>
+                  </div>
+
+                  {/* Right Column */}
+                  <div className="cs-form-column">
+                    <Field label="Priority" required>
+                      <SelectField
+                        value={priority}
+                        onChange={setPriority}
+                        leading={<i className={`cs-priority-dot ${priority.toLowerCase()}`} />}
+                      >
+                        <option>Critical</option>
+                        <option>High</option>
+                        <option>Medium</option>
+                        <option>Low</option>
+                      </SelectField>
+                    </Field>
+
+                    <Field label="Business Value">
+                      <SelectField value={businessValue} onChange={setBusinessValue}>
+                        <option>High</option>
+                        <option>Medium</option>
+                        <option>Low</option>
+                      </SelectField>
+                    </Field>
+
+                    <Field label="Sprint Category">
+                      <SelectField value={category} onChange={setCategory}>
+                        <option>Feature Development</option>
+                        <option>Technical Improvement</option>
+                        <option>Bug Fixing</option>
+                        <option>Infrastructure</option>
+                      </SelectField>
+                    </Field>
+
+                    <Field label="Tags">
+                      <div className="cs-tags">
+                        {tags.map((tag) => (
+                          <span className="cs-tag-pill" key={tag}>
+                            {tag}
+                            <button
+                              type="button"
+                              onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+                              aria-label={`Remove tag ${tag}`}
+                            >
+                              <X size={11} />
+                            </button>
+                          </span>
+                        ))}
+                        {addingTag ? (
+                          <div className="cs-tag-inline-add">
+                            <input
+                              autoFocus
+                              value={tagInput}
+                              onChange={(e) => setTagInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  addTag();
+                                } else if (e.key === "Escape") {
+                                  setAddingTag(false);
+                                  setTagInput("");
+                                }
+                              }}
+                              onBlur={addTag}
+                              placeholder="Type tag..."
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="cs-tag-add-btn"
+                            onClick={() => setAddingTag(true)}
+                          >
+                            <Plus size={12} /> Add Tag
+                          </button>
+                        )}
+                      </div>
+                    </Field>
+
+                    <Field label="Linked Requirement (Optional)">
+                      <div className="cs-linked-field">
+                        <select
+                          value={requirementLink}
+                          onChange={(e) => setRequirementLink(e.target.value)}
+                        >
+                          <option value="">None</option>
+                          {requirementsList.map((r) => (
+                            <option key={r.id} value={`${r.id} - ${r.name}`}>
+                              {r.id} - {r.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" onClick={() => setStep(3)}>
+                          <Plus size={12} /> Add Requirement
+                        </button>
+                      </div>
+                    </Field>
+
+                    <Field label="Dependencies (Optional)">
+                      <div className="cs-linked-field">
+                        <select value={dependency} onChange={(e) => setDependency(e.target.value)}>
+                          <option value="None">None</option>
+                          {existingSprints.map((s) => (
+                            <option key={s.id} value={`${s.sprintCode} - ${s.name}`}>
+                              {s.sprintCode} - {s.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setStep(3)}
+                        >
+                          <Plus size={12} /> Add Dependency
+                        </button>
+                      </div>
+                    </Field>
+
+                    <Field label="Sprint Color">
+                      <div className="cs-color-field">
+                        <div className="cs-color-swatch" style={{ background: sprintColor }}>
+                          <input
+                            type="color"
+                            value={sprintColor}
+                            onChange={(e) => setSprintColor(e.target.value)}
+                            aria-label="Pick sprint color"
+                          />
+                        </div>
+                        <span>{sprintColor.toUpperCase()}</span>
+                        <ChevronDown size={14} />
+                      </div>
+                    </Field>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {step === 2 && (
+              <section className="cs-step-panel">
+                <h2>Sprint Goal</h2>
+                <p className="cs-section-intro">
+                  Define the goal and expected outcomes for this sprint.
+                </p>
+
+                <Field label="Sprint Goal" required>
+                  <div className="cs-textarea-wrap">
+                    <textarea
+                      className="cs-textarea"
+                      rows={4}
+                      maxLength={500}
+                      value={goal}
+                      onChange={(e) => setGoal(e.target.value)}
+                      placeholder="What is the primary deliverable or release objective for this sprint?"
+                    />
+                    <span className="cs-inside-counter">{goal.length} / 500</span>
+                  </div>
+                </Field>
+
+                <Field label="Expected Outcome">
+                  <div className="cs-textarea-wrap">
+                    <textarea
+                      className="cs-textarea"
+                      rows={5}
+                      maxLength={1000}
+                      value={outcomes}
+                      onChange={(e) => setOutcomes(e.target.value)}
+                      placeholder="• Enter each expected outcome on a new line..."
+                    />
+                    <span className="cs-inside-counter">{outcomes.length} / 1000</span>
+                  </div>
+                </Field>
+
+                <Field label="Definition of Done">
+                  <div className="cs-textarea-wrap">
+                    <textarea
+                      className="cs-textarea"
+                      rows={5}
+                      maxLength={1000}
+                      value={definition}
+                      onChange={(e) => setDefinition(e.target.value)}
+                      placeholder="• Code complete & reviewed&#10;• Unit tests written and passed&#10;• QA verification passed"
+                    />
+                    <span className="cs-inside-counter">{definition.length} / 1000</span>
+                  </div>
+                </Field>
+              </section>
+            )}
+
+            {step === 3 && (
+              <section className="cs-step-panel">
+                <h2>Sprint Backlog (Add Top Requirements / Tasks)</h2>
+                <p className="cs-section-intro">
+                  Select requirements and tasks to include in this sprint.
+                </p>
+
+                <div className="cs-list-header">
+                  <h3>Select Requirements</h3>
+                  <span>{selectedRequirements.length} selected</span>
+                </div>
+                <div className="cs-list-search">
+                  <input
+                    placeholder="Search requirements..."
+                    value={requirementSearch}
+                    onChange={(e) => setRequirementSearch(e.target.value)}
+                  />
+                  {requirementsList.length > 0 && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedRequirements.length === requirementsList.length}
+                        onChange={(e) =>
+                          setSelectedRequirements(
+                            e.target.checked ? requirementsList.map((r) => r.id) : []
+                          )
+                        }
+                      />
+                      Select All
+                    </label>
+                  )}
+                </div>
+                <div className="cs-select-list">
+                  {requirementsList.length > 0 ? (
+                    requirementsList
+                      .filter((r) =>
+                        `${r.id} ${r.name}`.toLowerCase().includes(requirementSearch.toLowerCase())
+                      )
+                      .map((r) => (
+                        <label key={r.id}>
+                          <input
+                            type="checkbox"
+                            checked={selectedRequirements.includes(r.id)}
+                            onChange={() =>
+                              toggleItem(r.id, selectedRequirements, setSelectedRequirements)
+                            }
+                          />
+                          <span>
+                            <b>{r.id}</b> - {r.name}
+                          </span>
+                          <strong>{r.points} SP</strong>
+                        </label>
+                      ))
+                  ) : (
+                    <p style={{ padding: "16px", color: "#64748b", fontSize: "12.5px", margin: 0 }}>
+                      No requirements found in database.
+                    </p>
+                  )}
+                </div>
+
+                <div className="cs-list-footer">
+                  <span>
+                    Selected {selectedRequirementRows.length} of {requirementsList.length} requirements
+                  </span>
+                  <b>Total Story Points: {totalPoints}</b>
+                </div>
+
+                <div className="cs-list-header cs-task-heading">
+                  <h3>Add Tasks (Optional)</h3>
+                  <span>{selectedTasks.length} selected</span>
+                </div>
+                <div className="cs-list-search">
+                  <input
+                    placeholder="Search tasks..."
+                    value={taskSearch}
+                    onChange={(e) => setTaskSearch(e.target.value)}
+                  />
+                  {tasksList.length > 0 && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedTasks.length === tasksList.length}
+                        onChange={(e) =>
+                          setSelectedTasks(e.target.checked ? tasksList.map((t) => t.id) : [])
+                        }
+                      />
+                      Select All
+                    </label>
+                  )}
+                </div>
+                <div className="cs-select-list">
+                  {tasksList.length > 0 ? (
+                    tasksList
+                      .filter((t) =>
+                        `${t.id} ${t.name}`.toLowerCase().includes(taskSearch.toLowerCase())
+                      )
+                      .map((t) => (
+                        <label key={t.id}>
+                          <input
+                            type="checkbox"
+                            checked={selectedTasks.includes(t.id)}
+                            onChange={() => toggleItem(t.id, selectedTasks, setSelectedTasks)}
+                          />
+                          <span>
+                            <b>{t.id}</b> - {t.name}
+                          </span>
+                          <strong>{t.points} SP</strong>
+                        </label>
+                      ))
+                  ) : (
+                    <p style={{ padding: "16px", color: "#64748b", fontSize: "12.5px", margin: 0 }}>
+                      No active engineering tasks found in database.
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {step === 4 && (
+              <section className="cs-step-panel">
+                <h2>Schedule &amp; Capacity</h2>
+                <p className="cs-section-intro">
+                  Configure sprint timeline, working days, daily standup, and team capacity.
+                </p>
+
+                <div className="cs-schedule-grid">
+                  <div className="cs-schedule-fields">
+                    <Field label="Start Date" required>
+                      <div className="cs-date-field">
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                        />
+                        <CalendarDays size={15} />
+                      </div>
+                    </Field>
+
+                    <Field label="End Date" required>
+                      <div className="cs-date-field">
+                        <input
+                          type="date"
+                          min={startDate}
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                        />
+                        <CalendarDays size={15} />
+                      </div>
+                    </Field>
+
+                    <Field label="Duration (Working Days)">
+                      <div className="cs-readonly">
+                        <span>{workingDayCount} Days</span>
+                        <strong>{duration} Calendar Days</strong>
+                      </div>
+                    </Field>
+
+                    <Field label="Working Days">
+                      <div className="cs-day-pills">
+                        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => {
+                          const isSelected = workingDays.includes(day);
+                          return (
+                            <button
+                              type="button"
+                              key={day}
+                              className={isSelected ? "selected" : ""}
+                              onClick={() => toggleWorkingDay(day)}
+                            >
+                              {day} {isSelected && <X size={11} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </Field>
+
+                    <Field label="Daily Standup Time">
+                      <div className="cs-date-field">
+                        <input
+                          type="time"
+                          value={standupTime}
+                          onChange={(e) => setStandupTime(e.target.value)}
+                        />
+                        <Clock3 size={15} />
+                      </div>
+                    </Field>
+
+                    <Field label="Time Zone">
+                      <SelectField value={timezone} onChange={setTimezone}>
+                        <option>(GMT+05:30) India Standard Time</option>
+                        <option>(GMT+00:00) UTC</option>
+                        <option>(GMT+01:00) Central European Time</option>
+                        <option>(GMT-05:00) Eastern Time</option>
+                      </SelectField>
+                    </Field>
+
+                    <Field label="Hours per Member / Day">
+                      <input
+                        className="cs-input"
+                        type="number"
+                        min="1"
+                        max="24"
+                        value={dailyHours}
+                        onChange={(e) => setDailyHours(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="cs-capacity-card">
+                    <h3>Team Capacity</h3>
+                    <div className="cs-cap-stat">
+                      <span>Total Team Members</span>
+                      <b>{team.length}</b>
                     </div>
-                  </Field>
-
-                  <Field label="Dependencies (Optional)">
-                    <div className="cs-linked-field">
-                      <select value={dependency} onChange={(e) => setDependency(e.target.value)}>
-                        <option>SPR-001 - User Management Sprint</option>
-                        <option>SPR-002 - Appointment Module Sprint</option>
-                        <option>None</option>
-                      </select>
-                      <button type="button" onClick={() => setDependency("None")}>+ Add Dependency</button>
+                    <div className="cs-cap-stat">
+                      <span>Total Capacity (Hours)</span>
+                      <b>{totalCapacity}h</b>
                     </div>
-                  </Field>
-
-                  <Field label="Sprint Color">
-                    <div className="cs-color-field">
-                      <input type="color" value={sprintColor} onChange={(e) => setSprintColor(e.target.value)} />
-                      <span>{sprintColor.toUpperCase()}</span>
-                      <ChevronDown size={13} />
+                    <div className="cs-cap-stat">
+                      <span>Average Daily Capacity</span>
+                      <b>{dailyCapacity}h</b>
                     </div>
-                  </Field>
+                    <h3 className="cs-capacity-subtitle">Sprint Capacity by Role</h3>
+                    {roleBreakdown.map((item) => (
+                      <div className="cs-role-row" key={item.role}>
+                        <span>{item.role}</span>
+                        <b>{item.count}</b>
+                        <strong>{item.hours}h</strong>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
 
-          {step === 2 && (
-            <section className="cs-step-panel">
-              <h2>Sprint Goal</h2>
-              <p className="cs-section-intro">Define the goal and expected outcomes for this sprint.</p>
+            {step === 5 && (
+              <section className="cs-step-panel">
+                <h2>Review &amp; Confirm</h2>
+                <p className="cs-section-intro">
+                  Review your sprint configuration before creating it in the database.
+                </p>
 
-              <Field label="Sprint Goal" required>
-                <textarea rows={4} maxLength={500} value={goal} onChange={(e) => setGoal(e.target.value)} />
-                <small className="cs-counter">{goal.length} / 500</small>
-              </Field>
+                <div className="cs-review-grid">
+                  <div className="cs-review-card">
+                    <h3><FileText size={14} /> Basic Information</h3>
+                    {[
+                      ["Project", projectDisplay],
+                      ["Milestone", milestoneDisplay],
+                      ["Sprint Name", name || "—"],
+                      ["Sprint Code", code],
+                      ["Sprint Type", sprintType],
+                      ["Priority", priority],
+                      ["Sprint Owner", owner || "Unassigned"],
+                      ["Co-Owners", coOwners.join(", ") || "—"],
+                    ].map(([k, v]) => (
+                      <div className="cs-review-row" key={k}>
+                        <span>{k}</span>
+                        <b>{v}</b>
+                      </div>
+                    ))}
+                  </div>
 
-              <Field label="Expected Outcome">
-                <textarea rows={6} maxLength={1000} value={outcomes} onChange={(e) => setOutcomes(e.target.value)} />
-                <small className="cs-hint">Enter each expected outcome on a new line.</small>
-              </Field>
+                  <div className="cs-review-card">
+                    <h3><Target size={14} /> Sprint Goal</h3>
+                    <p>{goal || "No sprint goal defined."}</p>
+                    <h4>Definition of Done</h4>
+                    <p className="cs-preserve-lines">
+                      {definition || "No definition of done specified."}
+                    </p>
+                    <h4>Schedule</h4>
+                    {[
+                      ["Start Date", dateLabel(startDate)],
+                      ["End Date", dateLabel(endDate)],
+                      ["Duration", `${workingDayCount} Working Days`],
+                      ["Working Days", workingDays.join(", ")],
+                    ].map(([k, v]) => (
+                      <div className="cs-review-row" key={k}>
+                        <span>{k}</span>
+                        <b>{v}</b>
+                      </div>
+                    ))}
+                  </div>
 
-              <Field label="Definition of Done">
-                <textarea rows={6} maxLength={1000} value={definition} onChange={(e) => setDefinition(e.target.value)} />
-                <small className="cs-hint">Specify the conditions required to consider this sprint complete.</small>
-              </Field>
-            </section>
-          )}
-
-          {step === 3 && (
-            <section className="cs-step-panel">
-              <h2>Sprint Backlog (Add Top Requirements / Tasks)</h2>
-              <p className="cs-section-intro">Select requirements and tasks to include in this sprint.</p>
-
-              <div className="cs-list-header">
-                <h3>Requirements</h3>
-                <span>{selectedRequirements.length} selected</span>
-              </div>
-              <div className="cs-list-search">
-                <input placeholder="Search requirements..." value={requirementSearch} onChange={(e) => setRequirementSearch(e.target.value)} />
-                <label><input type="checkbox" checked={selectedRequirements.length === requirements.length} onChange={(e) => setSelectedRequirements(e.target.checked ? requirements.map((r) => r.id) : [])} /> Select All</label>
-              </div>
-              <div className="cs-select-list">
-                {requirements.filter((r) => `${r.id} ${r.name}`.toLowerCase().includes(requirementSearch.toLowerCase())).map((r) => (
-                  <label key={r.id}>
-                    <input type="checkbox" checked={selectedRequirements.includes(r.id)} onChange={() => toggleItem(r.id, selectedRequirements, setSelectedRequirements)} />
-                    <span><b>{r.id}</b> - {r.name}</span>
-                    <strong>{r.points} SP</strong>
-                  </label>
-                ))}
-              </div>
-
-              <div className="cs-list-footer">
-                <span>Selected {selectedRequirementRows.length} of {requirements.length} requirements</span>
-                <b>Total Story Points: {totalPoints}</b>
-              </div>
-
-              <div className="cs-list-header cs-task-heading">
-                <h3>Add Tasks (Optional)</h3>
-                <span>{selectedTasks.length} selected</span>
-              </div>
-              <div className="cs-list-search">
-                <input placeholder="Search tasks..." value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} />
-                <label><input type="checkbox" checked={selectedTasks.length === tasks.length} onChange={(e) => setSelectedTasks(e.target.checked ? tasks.map((t) => t.id) : [])} /> Select All</label>
-              </div>
-              <div className="cs-select-list">
-                {tasks.filter((t) => `${t.id} ${t.name}`.toLowerCase().includes(taskSearch.toLowerCase())).map((t) => (
-                  <label key={t.id}>
-                    <input type="checkbox" checked={selectedTasks.includes(t.id)} onChange={() => toggleItem(t.id, selectedTasks, setSelectedTasks)} />
-                    <span><b>{t.id}</b> - {t.name}</span>
-                    <strong>{t.points} SP</strong>
-                  </label>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {step === 4 && (
-            <section className="cs-step-panel">
-              <h2>Schedule &amp; Capacity</h2>
-              <p className="cs-section-intro">Set sprint dates, working days, standup time and team capacity.</p>
-
-              <div className="cs-schedule-grid">
-                <div className="cs-schedule-fields">
-                  <Field label="Start Date" required>
-                    <div className="cs-date-field"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /><CalendarDays size={14} /></div>
-                  </Field>
-                  <Field label="End Date" required>
-                    <div className="cs-date-field"><input type="date" min={startDate} value={endDate} onChange={(e) => setEndDate(e.target.value)} /><CalendarDays size={14} /></div>
-                  </Field>
-                  <Field label="Duration (Working Days)">
-                    <div className="cs-readonly">{workingDayCount} Working Days <span>({duration} calendar days)</span></div>
-                  </Field>
-                  <Field label="Working Days">
-                    <div className="cs-day-pills">
-                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-                        <button type="button" key={day} className={workingDays.includes(day) ? "selected" : ""} onClick={() => toggleWorkingDay(day)}>{day}</button>
-                      ))}
+                  <div className="cs-review-card">
+                    <h3><Flag size={14} /> Sprint Backlog Summary</h3>
+                    <div className="cs-review-metrics">
+                      <div><span>Requirements</span><b>{selectedRequirements.length}</b></div>
+                      <div><span>Tasks</span><b>{totalTasks}</b></div>
+                      <div><span>Story Points</span><b>{totalPoints}</b></div>
                     </div>
-                  </Field>
-                  <Field label="Daily Standup Time">
-                    <div className="cs-date-field"><input type="time" value={standupTime} onChange={(e) => setStandupTime(e.target.value)} /><Clock3 size={14} /></div>
-                  </Field>
-                  <Field label="Time Zone">
-                    <SelectField value={timezone} onChange={setTimezone}>
-                      <option>(GMT+05:30) India Standard Time</option>
-                      <option>(GMT+00:00) UTC</option>
-                      <option>(GMT+01:00) Central European Time</option>
-                    </SelectField>
-                  </Field>
-                  <Field label="Hours per Member / Day">
-                    <input type="number" min="1" max="24" value={dailyHours} onChange={(e) => setDailyHours(e.target.value)} />
-                  </Field>
+                  </div>
+
+                  <div className="cs-review-card">
+                    <h3><CalendarDays size={14} /> Team Capacity</h3>
+                    <div className="cs-review-metrics">
+                      <div><span>Total Members</span><b>{team.length}</b></div>
+                      <div><span>Total Capacity</span><b>{totalCapacity}h</b></div>
+                      <div><span>Daily Capacity</span><b>{dailyCapacity}h</b></div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="cs-capacity-card">
-                  <h3>Team Capacity</h3>
-                  <div><span>Total Team Members</span><b>{team.length}</b></div>
-                  <div><span>Total Capacity (Hours)</span><b>{totalCapacity}h</b></div>
-                  <div><span>Average Daily Capacity</span><b>{dailyCapacity}h</b></div>
-                  <h3 className="cs-capacity-subtitle">Sprint Capacity by Role</h3>
-                  {[
-                    ["Developers", "3", "240h"],
-                    ["QA Engineers", "1", "80h"],
-                    ["UI/UX Designer", "1", "80h"],
-                    ["Business Analyst", "0", "0h"],
-                  ].map(([role, count, hours]) => (
-                    <div className="cs-role-row" key={role}><span>{role}</span><b>{count}</b><strong>{hours}</strong></div>
-                  ))}
+                <div className="cs-confirm-note">
+                  <ShieldCheck size={17} />
+                  <span>
+                    Confirm that the sprint details, backlog, and schedule are accurate before creating.
+                  </span>
                 </div>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
+          </main>
 
-          {step === 5 && (
-            <section className="cs-step-panel">
-              <h2>Review &amp; Confirm</h2>
-              <p className="cs-section-intro">Review your sprint information before creating the sprint.</p>
-
-              <div className="cs-review-grid">
-                <div className="cs-review-card">
-                  <h3><FileText size={14} /> Basic Information</h3>
-                  {[
-                    ["Project", project],
-                    ["Milestone", milestone],
-                    ["Sprint Name", name],
-                    ["Sprint Code", code],
-                    ["Sprint Type", sprintType],
-                    ["Priority", priority],
-                    ["Sprint Owner", owner],
-                    ["Co-Owners", coOwners.join(", ") || "—"],
-                  ].map(([k, v]) => <div className="cs-review-row" key={k}><span>{k}</span><b>{v}</b></div>)}
-                </div>
-                <div className="cs-review-card">
-                  <h3><Target size={14} /> Sprint Goal</h3>
-                  <p>{goal}</p>
-                  <h4>Expected Outcomes</h4>
-                  <p className="cs-preserve-lines">{outcomes}</p>
-                  <h4>Definition of Done</h4>
-                  <p className="cs-preserve-lines">{definition}</p>
-                </div>
-                <div className="cs-review-card">
-                  <h3><Flag size={14} /> Sprint Backlog Summary</h3>
-                  <div className="cs-review-metrics"><div><span>Requirements</span><b>{selectedRequirements.length}</b></div><div><span>Tasks</span><b>{totalTasks}</b></div><div><span>Story Points</span><b>{totalPoints}</b></div></div>
-                  {selectedRequirementRows.map((r) => <div className="cs-review-row" key={r.id}><span>{r.id} - {r.name}</span><b>{r.points} SP</b></div>)}
-                </div>
-                <div className="cs-review-card">
-                  <h3><CalendarDays size={14} /> Schedule &amp; Capacity</h3>
-                  {[
-                    ["Start Date", dateLabel(startDate)],
-                    ["End Date", dateLabel(endDate)],
-                    ["Duration", `${duration} Calendar Days`],
-                    ["Working Days", `${workingDayCount} Days`],
-                    ["Team Members", String(team.length)],
-                    ["Total Capacity", `${totalCapacity}h`],
-                    ["Daily Standup", standupTime],
-                    ["Time Zone", timezone],
-                  ].map(([k, v]) => <div className="cs-review-row" key={k}><span>{k}</span><b>{v}</b></div>)}
-                </div>
-              </div>
-
-              <div className="cs-confirm-note">
-                <ShieldCheck size={18} />
-                <span>Confirm that the sprint details, backlog, and schedule are correct before creating the sprint.</span>
-              </div>
-            </section>
-          )}
-
+          {/* Footer Buttons directly beneath Left Card (Exact match to SPR-002) */}
           <footer className="cs-form-footer">
-            <button className="cs-secondary" onClick={step === 1 ? () => window.history.back() : previousStep}>
-              <ChevronLeft size={14} /> {step === 1 ? "Cancel" : "Back"}
+            <button
+              type="button"
+              className="cs-btn cs-btn-outline-blue"
+              onClick={step === 1 ? () => router.push("/sprints") : previousStep}
+            >
+              {step === 1 ? (
+                "Cancel"
+              ) : (
+                <>
+                  <ArrowLeft size={14} /> Back
+                </>
+              )}
             </button>
+
             {step < 5 ? (
-              <button className="cs-primary" disabled={!canContinue()} onClick={nextStep}>
-                Next: {steps[step]} <ChevronRight size={14} />
+              <button
+                type="button"
+                className="cs-btn cs-btn-primary"
+                disabled={!canContinue()}
+                onClick={nextStep}
+              >
+                Next: {steps[step]} <ArrowRight size={14} />
               </button>
             ) : (
-              <button className="cs-create-button" onClick={createSprint}>
-                <Check size={15} /> Create Sprint
+              <button
+                type="button"
+                className="cs-btn cs-btn-success"
+                disabled={submitting}
+                onClick={createSprint}
+              >
+                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                {submitting ? "Creating..." : "Create Sprint"}
               </button>
             )}
           </footer>
-        </main>
+        </div>
 
+        {/* Right Sprint Summary Card (Exact match to SPR-002) */}
         <aside className="cs-summary-card">
           <h2>Sprint Summary</h2>
-          <div className="cs-summary-row"><span>Project</span><b>{project}</b></div>
-          <div className="cs-summary-row"><span>Milestone</span><b>{milestone}</b></div>
-          <div className="cs-summary-row"><span>Sprint Name</span><b>{name || "—"}</b></div>
-          <div className="cs-summary-row"><span>Sprint Code</span><b>{code || "—"}</b></div>
-          <div className="cs-summary-row"><span>Sprint Type</span><b>{sprintType}</b></div>
-          <div className="cs-summary-row"><span>Priority</span><b><i className="cs-priority-dot" />{priority}</b></div>
-          <div className="cs-summary-row"><span>Sprint Owner</span><b><Avatar name={owner} />{owner}</b></div>
-          <div className="cs-summary-row"><span>Start Date</span><b>{dateLabel(startDate)}</b></div>
-          <div className="cs-summary-row"><span>End Date</span><b>{dateLabel(endDate)}</b></div>
-          <div className="cs-summary-row"><span>Duration</span><b>{duration ? `${duration} days` : "— days"}</b></div>
-          <div className="cs-summary-row"><span>Status</span><b><i className="cs-planning">Planning</i></b></div>
-          <div className="cs-summary-row"><span>Total Story Points</span><b>{totalPoints || "—"}</b></div>
-          <div className="cs-summary-row"><span>Total Tasks</span><b>{totalTasks || "—"}</b></div>
-          <div className="cs-summary-row"><span>Capacity</span><b>{totalCapacity ? `${totalCapacity}h` : "—"}</b></div>
+          <div className="cs-summary-list">
+            <div className="cs-summary-row"><span>Project</span><b>{projectDisplay}</b></div>
+            <div className="cs-summary-row"><span>Milestone</span><b>{milestoneDisplay}</b></div>
+            <div className="cs-summary-row"><span>Sprint Name</span><b>{name || "—"}</b></div>
+            <div className="cs-summary-row"><span>Sprint Code</span><b>{code || "—"}</b></div>
+            <div className="cs-summary-row"><span>Sprint Type</span><b>{sprintType}</b></div>
+            <div className="cs-summary-row">
+              <span>Priority</span>
+              <b><i className={`cs-priority-dot ${priority.toLowerCase()}`} />{priority}</b>
+            </div>
+            <div className="cs-summary-row">
+              <span>Sprint Owner</span>
+              <b>
+                {owner ? (
+                  <>
+                    <Avatar name={owner} small />
+                    {owner}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </b>
+            </div>
+            <div className="cs-summary-row"><span>Start Date</span><b>{dateLabel(startDate)}</b></div>
+            <div className="cs-summary-row"><span>End Date</span><b>{dateLabel(endDate)}</b></div>
+            <div className="cs-summary-row"><span>Duration</span><b>{duration ? `${duration} days` : "— days"}</b></div>
+            <div className="cs-summary-row"><span>Status</span><b><i className="cs-planning">Planning</i></b></div>
+            <div className="cs-summary-row"><span>Total Story Points</span><b>{totalPoints ? `${totalPoints} SP` : "—"}</b></div>
+            <div className="cs-summary-row"><span>Total Tasks</span><b>{totalTasks || "—"}</b></div>
+            <div className="cs-summary-row"><span>Capacity</span><b>{startDate && endDate ? `${totalCapacity}h` : "—"}</b></div>
+          </div>
 
-          <div className="cs-summary-created">
-            <div><Avatar name="Mayank Swaroop" /><span><b>Mayank Swaroop</b><small>Created By</small></span></div>
-            <span>16 May 2025, 11:20 AM</span>
+          <div className="cs-summary-meta">
+            <div className="cs-summary-row">
+              <span>Created By</span>
+              <b><Avatar name={createdByName} small />{createdByName}</b>
+            </div>
+            <div className="cs-summary-row">
+              <span>Created On</span>
+              <b>{createdOnText || "—"}</b>
+            </div>
           </div>
         </aside>
       </div>

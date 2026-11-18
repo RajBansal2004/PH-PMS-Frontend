@@ -22,20 +22,35 @@ import {
 
 import {
   getAccessToken,
+  getRefreshToken,
   getStoredUser,
   isTokenExpired,
   type AuthUser,
 } from "../lib/auth";
 
+import {
+  canAccessPath,
+  getDefaultRouteForRole,
+  getRoleProfile,
+  resolveRoleCode,
+  type CanonicalRoleCode,
+  type RoleProfile,
+} from "../lib/rbac";
+
 type AuthContextValue = {
   user: AuthUser | null;
   loading: boolean;
   signingIn: boolean;
+  realRoleCode: CanonicalRoleCode;
+  effectiveRoleCode: CanonicalRoleCode;
+  roleProfile: RoleProfile;
+  isSuperAdmin: boolean;
 
   signIn: (
     email: string,
     password: string,
-    remember: boolean
+    remember: boolean,
+    captchaToken?: string
   ) => Promise<AuthUser>;
 
   signOut: () => Promise<void>;
@@ -72,6 +87,19 @@ export function AuthProvider({
 
   const [signingIn, setSigningIn] =
     useState(false);
+
+  const realRoleCode = useMemo(
+    () => resolveRoleCode(user),
+    [user]
+  );
+
+  const isSuperAdmin = realRoleCode === "SUPER_ADMIN";
+  const effectiveRoleCode: CanonicalRoleCode = realRoleCode;
+
+  const roleProfile = useMemo(
+    () => getRoleProfile(effectiveRoleCode),
+    [effectiveRoleCode]
+  );
 
   /*
    * ------------------------------------------------
@@ -136,7 +164,7 @@ export function AuthProvider({
 
     (async () => {
       const hasToken =
-        !!getAccessToken();
+        !!(getAccessToken() || getRefreshToken());
 
       if (hasToken) {
         await refreshUser();
@@ -221,7 +249,7 @@ export function AuthProvider({
     ) {
       router.replace(
         user.organizationId
-          ? "/dashboard"
+          ? getDefaultRouteForRole(effectiveRoleCode)
           : "/organization/setup"
       );
 
@@ -242,12 +270,28 @@ export function AuthProvider({
       router.replace(
         "/organization/setup"
       );
+      return;
+    }
+
+    /*
+     * Role-based landing redirect & strict route guard.
+     */
+    if (user && user.organizationId && !isPublic && !isOrganizationSetup) {
+      if (pathname === "/" || (pathname === "/dashboard" && !canAccessPath(effectiveRoleCode, "/dashboard"))) {
+        router.replace(getDefaultRouteForRole(effectiveRoleCode));
+        return;
+      }
+      if (!canAccessPath(effectiveRoleCode, pathname)) {
+        router.replace("/auth/access-denied");
+        return;
+      }
     }
   }, [
     loading,
     user,
     pathname,
     router,
+    effectiveRoleCode,
   ]);
 
   /*
@@ -300,11 +344,16 @@ export function AuthProvider({
         user,
         loading,
         signingIn,
+        realRoleCode,
+        effectiveRoleCode,
+        roleProfile,
+        isSuperAdmin,
 
         signIn: async (
           email,
           password,
-          remember
+          remember,
+          captchaToken
         ) => {
           setSigningIn(true);
 
@@ -313,7 +362,8 @@ export function AuthProvider({
               await authLogin(
                 email,
                 password,
-                remember
+                remember,
+                captchaToken
               );
 
             setUser(result.user);
@@ -338,6 +388,10 @@ export function AuthProvider({
         user,
         loading,
         signingIn,
+        realRoleCode,
+        effectiveRoleCode,
+        roleProfile,
+        isSuperAdmin,
       ]
     );
 

@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Activity, AlertTriangle, BarChart3, CalendarDays, CheckCircle2, ChevronDown, CircleDollarSign, Clock3, Cloud, FileText, GitBranch, Globe2, MoreHorizontal, Plus, Rocket, Search, Settings2, ShieldCheck, Users, WalletCards, Zap } from "lucide-react";
+import { project as apiGetProject } from "../lib/api";
 import { ProjectHeader } from "./ProjectHeader";
 import { StatusBadge } from "./StatusBadge";
 
@@ -15,7 +17,53 @@ const quickLinksList: [typeof CalendarDays, string][] = [
 ];
 
 const team=["Rahul Verma","Amit Kumar","Neha Patel","Pooja Singh","Vikram Singh","Rohit Sharma","Sneha Reddy","Karthik Reddy"];
-export function ProjectOverview(){return <div><ProjectHeader/><div className="project-summary-grid"><div className="card summary"><div className="section-head"><b>Project Summary</b><a>View Details</a></div><p>Implementation of AI-CMS platform including configuration, data migration, training and go-live support for Apollo Hospitals across all departments.</p><div className="detail-grid"><span>Methodology<b>Agile</b></span><span>Project Category<b>Healthcare IT</b></span><span>Department<b>Technology</b></span><span>Location<b>Hyderabad, Telangana, India</b></span></div><div className="tag-row"><StatusBadge>AI-CMS</StatusBadge><StatusBadge>Implementation</StatusBadge><StatusBadge>Healthcare</StatusBadge><StatusBadge>+2</StatusBadge></div></div><div className="card progress-card"><div className="section-head"><b>Progress Overview</b></div><div className="chart-line"><div className="planned"/><div className="actual"/></div><div className="metric-stack"><span>Planned Progress <b>72%</b></span><span>Actual Progress <b className="green-text">72%</b></span><span>Behind Schedule <b className="red-text">0%</b></span><span>SPI <b>1.00 <small>On Track</small></b></span><span>CPI <b>0.94 <small>Within Range</small></b></span></div></div><div className="card health-card"><div className="section-head"><b>Project Health</b></div><div className="health-score"><div className="shield">✓</div><strong>Good</strong><span>Project is on track. No major risks identified.</span></div>{["Schedule","Budget","Resources","Quality","Scope"].map(x=><div className="health-row" key={x}><span>{x}</span><StatusBadge tone="green">Good</StatusBadge></div>)}</div><div className="card keydates"><div className="section-head"><b>Key Dates</b></div>{[["Project Start Date","01 Jan 2025"],["Planned End Date","30 Jun 2025"],["Expected End Date","30 Jun 2025"],["Last Milestone","System Design","Completed 30 Apr 2025"],["Next Milestone","Development Phase 2","Due on 31 May 2025"]].map(x=><div className="keydate" key={x[0]}><span>{x[0]}</span><b>{x[1]}</b><small>{x[2]}</small></div>)}</div></div><div className="dashboard-panels"><Panel title="Milestones"><TimelineList items={[["Requirement Finalization","15 May 2025","Completed"],["System Design & Architecture","30 May 2025","Completed"],["Development Phase 1","30 Apr 2025","Completed"],["Development Phase 2","31 May 2025","In Progress"],["Testing & QA","30 Jun 2025","Pending"],["UAT & Client Sign-off","15 Oct 2025","Pending"]]}/></Panel><Panel title="Tasks Overview"><div className="big-donut">172</div><div className="legend compact"><span>● Completed <b>98 (56.98%)</b></span><span>● In Progress <b>26 (15.12%)</b></span><span>● To Do <b>32 (18.60%)</b></span><span>● On Hold <b>9 (5.23%)</b></span></div></Panel><Panel title="Budget Overview (INR)"><h2>₹ 26,40,000</h2><p>Spent <b>₹ 18,90,000 (71.59%)</b></p><div className="bar-progress"><i style={{width:"72%"}}/></div><div className="split"><span>Remaining <b>₹ 7,50,000</b></span><span>Variance <b>₹ 60,000</b></span></div></Panel><Panel title="Top Risks & Issues"><TimelineList items={[["Delay in data migration due to data quality issues","Identified on 09 May 2025","High"],["Dependency on 3rd party API integration","Identified on 02 May 2025","Medium"],["Resource availability in May month","Identified on 29 Apr 2025","Medium"],["Client feedback pending for design changes","Identified on 25 Apr 2025","Low"]]}/></Panel></div><div className="lower-grid"><Panel title="Team Allocation"><div className="people-list">{team.slice(0,5).map((n,i)=><div key={n}><div className="avatar small">{n.split(" ").map(s=>s[0]).join("")}</div><span>{n}<small>{["Project Manager","Tech Lead","Business Analyst","QA Lead","Developer"][i]}</small></span><b>{[100,80,80,60,100][i]}%</b></div>)}</div></Panel><Panel title="Recent Activity"><TimelineList items={[["Development Phase 1 marked as completed","by Rahul Verma","10 May 2025, 04:30 PM"],["Sprint 12 created","by Neha Patel","10 May 2025, 03:15 PM"],["Task 'API Integration' updated","by Amit Kumar","10 May 2025, 02:40 PM"],["Document uploaded","by Pooja Singh","10 May 2025, 01:10 PM"]]}/></Panel><Panel title="Documents"><TimelineList items={[["Project Charter.pdf","Uploaded by Rahul Verma","245 KB"],["SRS Document.docx","Uploaded by Amit Kumar","512 KB"],["System Design.pdf","Uploaded by Neha Patel","1.2 MB"],["Test Plan.xlsx","Uploaded by Pooja Singh","340 KB"]]}/></Panel><Panel title="Quick Links"><div className="quick-links">{quickLinksList.map(([IconComponent, label])=><Link href="#" key={label}><IconComponent size={20}/><b>{label}</b><small>Manage / View</small></Link>)}</div></Panel></div></div>}
+export function ProjectOverview({ initialTab = "Overview" }: { initialTab?: string } = {}) {
+  const params = useParams();
+  const rawId = (params?.id as string) || "1";
+  const id = rawId === "new" ? "1" : rawId;
+  const [projectData, setProjectData] = useState<any>(null);
+
+  useEffect(() => {
+    if (!id || id === "1") return;
+    let mounted = true;
+    apiGetProject(id)
+      .then((res) => {
+        if (!mounted) return;
+        const d = res?.data || res;
+        if (d && (d.projectName || d.projectCode)) {
+          setProjectData(d);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  const clientName = projectData?.clientId?.displayName || projectData?.clientId?.legalName || "Apollo Hospitals";
+  const desc = projectData?.description || `Implementation project for ${clientName} across designated real-estate and operational sites.`;
+  const category = projectData?.projectCategory || "Construction & Civil";
+  const budgetFormatted = projectData?.budget
+    ? "₹ " + Number(projectData.budget).toLocaleString("en-IN")
+    : "₹ 26,40,000";
+
+  const formatDate = (dStr?: string) => {
+    if (!dStr) return "—";
+    try {
+      return new Date(dStr).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return dStr;
+    }
+  };
+
+  const startDate = projectData?.startDate ? formatDate(projectData.startDate) : "01 Jan 2025";
+  const endDate = projectData?.targetCompletion ? formatDate(projectData.targetCompletion) : "30 Jun 2025";
+
+  return <div><ProjectHeader tab={initialTab} projectId={id} /><div className="project-summary-grid"><div className="card summary"><div className="section-head"><b>Project Summary</b><a>View Details</a></div><p>{desc}</p><div className="detail-grid"><span>Client<b>{clientName}</b></span><span>Project Category<b>{category}</b></span><span>Contract Type<b>{projectData?.contractType || "Fixed Price"}</b></span><span>Billing<b>{projectData?.billingType || "Milestone Based"}</b></span></div><div className="tag-row"><StatusBadge>{projectData?.projectCode || "PRJ-002"}</StatusBadge><StatusBadge>{category}</StatusBadge><StatusBadge tone="green">{projectData?.status || "ACTIVE"}</StatusBadge></div></div><div className="card progress-card"><div className="section-head"><b>Progress Overview</b></div><div className="chart-line"><div className="planned"/><div className="actual"/></div><div className="metric-stack"><span>Planned Progress <b>72%</b></span><span>Actual Progress <b className="green-text">72%</b></span><span>Behind Schedule <b className="red-text">0%</b></span><span>SPI <b>1.00 <small>On Track</small></b></span><span>CPI <b>0.94 <small>Within Range</small></b></span></div></div><div className="card health-card"><div className="section-head"><b>Project Health</b></div><div className="health-score"><div className="shield">✓</div><strong>{projectData?.projectHealth || "Good"}</strong><span>Project is on track. No major blockers identified.</span></div>{["Schedule","Budget","Resources","Quality","Scope"].map(x=><div className="health-row" key={x}><span>{x}</span><StatusBadge tone="green">Good</StatusBadge></div>)}</div><div className="card keydates"><div className="section-head"><b>Key Dates</b></div>{[["Project Start Date", startDate],["Planned End Date", endDate],["Expected End Date", endDate],["Last Milestone","Foundation & RCC Structure","Completed"],["Next Milestone","Civil Finishes & MEP","In Progress"]].map(x=><div className="keydate" key={x[0]}><span>{x[0]}</span><b>{x[1]}</b><small>{x[2]}</small></div>)}</div></div><div className="dashboard-panels"><Panel title="Milestones"><TimelineList items={[["Requirement Finalization","15 May 2025","Completed"],["System Design & Architecture","30 May 2025","Completed"],["Development Phase 1","30 Apr 2025","Completed"],["Development Phase 2","31 May 2025","In Progress"],["Testing & QA","30 Jun 2025","Pending"],["UAT & Client Sign-off","15 Oct 2025","Pending"]]}/></Panel><Panel title="Tasks Overview"><div className="big-donut">172</div><div className="legend compact"><span>● Completed <b>98 (56.98%)</b></span><span>● In Progress <b>26 (15.12%)</b></span><span>● To Do <b>32 (18.60%)</b></span><span>● On Hold <b>9 (5.23%)</b></span></div></Panel><Panel title="Budget Overview (INR)"><h2>{budgetFormatted}</h2><p>Spent <b>₹ 18,90,000 (71.59%)</b></p><div className="bar-progress"><i style={{width:"72%"}}/></div><div className="split"><span>Remaining <b>₹ 7,50,000</b></span><span>Variance <b>₹ 60,000</b></span></div></Panel><Panel title="Top Risks & Issues"><TimelineList items={[["Delay in data migration due to data quality issues","Identified on 09 May 2025","High"],["Dependency on 3rd party API integration","Identified on 02 May 2025","Medium"],["Resource availability in May month","Identified on 29 Apr 2025","Medium"],["Client feedback pending for design changes","Identified on 25 Apr 2025","Low"]]}/></Panel></div><div className="lower-grid"><Panel title="Team Allocation"><div className="people-list">{team.slice(0,5).map((n,i)=><div key={n}><div className="avatar small">{n.split(" ").map(s=>s[0]).join("")}</div><span>{n}<small>{["Project Manager","Tech Lead","Business Analyst","QA Lead","Developer"][i]}</small></span><b>{[100,80,80,60,100][i]}%</b></div>)}</div></Panel><Panel title="Recent Activity"><TimelineList items={[["Development Phase 1 marked as completed","by Rahul Verma","10 May 2025, 04:30 PM"],["Sprint 12 created","by Neha Patel","10 May 2025, 03:15 PM"],["Task 'API Integration' updated","by Amit Kumar","10 May 2025, 02:40 PM"],["Document uploaded","by Pooja Singh","10 May 2025, 01:10 PM"]]}/></Panel><Panel title="Documents"><TimelineList items={[["Project Charter.pdf","Uploaded by Rahul Verma","245 KB"],["SRS Document.docx","Uploaded by Amit Kumar","512 KB"],["System Design.pdf","Uploaded by Neha Patel","1.2 MB"],["Test Plan.xlsx","Uploaded by Pooja Singh","340 KB"]]}/></Panel><Panel title="Quick Links"><div className="quick-links">{quickLinksList.map(([IconComponent, label])=><Link href="#" key={label}><IconComponent size={20}/><b>{label}</b><small>Manage / View</small></Link>)}</div></Panel></div></div>}
 function Panel({title,children}:{title:string;children:React.ReactNode}){return <section className="card panel"><div className="section-head"><b>{title}</b><a>View All</a></div>{children}</section>}
 function TimelineList({items}:{items:string[][]}){return <div className="timeline-list">{items.map((x,i)=><div key={i}><span className={`dot d${i%4}`}/><div><b>{x[0]}</b><small>{x[1]}</small></div><em>{x[2]}</em></div>)}</div>}
 

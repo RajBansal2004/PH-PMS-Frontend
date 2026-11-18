@@ -1,7 +1,7 @@
-
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -20,10 +20,15 @@ import {
   Trash2,
   Upload,
   X,
-  Loader2,
+  Building2,
+  FolderKanban,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 
-import { createMilestone, employees, projects } from "../../lib/api";
+import { projects as getProjectsApi } from "../../lib/api";
+import { milestoneApi } from "../../lib/milestones/api";
+import { getOrganizationId } from "../../lib/auth";
 import type { MilestonePriority, MilestoneStatus, MilestoneType } from "../../lib/milestones/types";
 import "./milestone-form.css";
 
@@ -66,7 +71,8 @@ const steps = [
   "Additional Information",
   "Review & Submit",
 ];
-const STATUS_OPTIONS = [
+
+const STATUS_OPTIONS: MilestoneStatus[] = [
   "Completed",
   "In Progress",
   "Upcoming",
@@ -75,9 +81,10 @@ const STATUS_OPTIONS = [
   "On Hold",
   "Cancelled",
 ];
+
 const initialValues: FormValues = {
   projectId: "",
-  milestoneId: `MLS-${String(Math.floor(100 + Math.random() * 900))}`,
+  milestoneId: "",
   type: "Phase",
   module: "Requirements Management",
   title: "",
@@ -95,12 +102,12 @@ const initialValues: FormValues = {
   dependencies: "",
   requestedBy: "",
   owner: "",
-  budget: "0",
+  budget: "10",
   notes: "",
 };
 
 const requiredByStep: Record<number, (keyof FormValues)[]> = {
-  0: ["projectId", "milestoneId", "type", "module", "title", "priority", "status"],
+  0: ["projectId", "milestoneId", "type", "title", "priority", "status"],
   1: ["plannedStart", "plannedEnd"],
   2: ["businessObjective", "acceptanceCriteria"],
   3: ["owner"],
@@ -108,52 +115,272 @@ const requiredByStep: Record<number, (keyof FormValues)[]> = {
   5: [],
 };
 
+// Top-level stable field components to prevent DOM remounting / focus loss
+interface BaseFieldProps {
+  label: string;
+  name: keyof FormValues;
+  required?: boolean;
+  error?: string;
+}
+
+interface TextFieldProps extends BaseFieldProps {
+  value: string | number;
+  onChange: (name: keyof FormValues, val: string) => void;
+  placeholder?: string;
+  type?: string;
+  readOnly?: boolean;
+}
+
+function TextField({
+  label,
+  name,
+  value,
+  required,
+  error,
+  onChange,
+  placeholder,
+  type = "text",
+  readOnly = false,
+}: TextFieldProps) {
+  return (
+    <label className="ms-field">
+      <span>
+        {label}
+        {required && <b> *</b>}
+      </span>
+      <input
+        type={type}
+        value={String(value ?? "")}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        style={readOnly ? { background: "#f8fafc", cursor: "not-allowed" } : {}}
+        onChange={(e) => onChange(name, e.target.value)}
+        aria-invalid={Boolean(error)}
+      />
+      {error && <small className="ms-error">{error}</small>}
+    </label>
+  );
+}
+
+interface SelectFieldProps extends BaseFieldProps {
+  value: string;
+  onChange: (name: keyof FormValues, val: string) => void;
+  options: { label: string; value: string }[];
+}
+
+function SelectField({
+  label,
+  name,
+  value,
+  required,
+  error,
+  onChange,
+  options,
+}: SelectFieldProps) {
+  return (
+    <label className="ms-field">
+      <span>
+        {label}
+        {required && <b> *</b>}
+      </span>
+      <select
+        value={String(value ?? "")}
+        onChange={(e) => onChange(name, e.target.value)}
+        aria-invalid={Boolean(error)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {error && <small className="ms-error">{error}</small>}
+    </label>
+  );
+}
+
+interface TextAreaFieldProps extends BaseFieldProps {
+  value: string;
+  onChange: (name: keyof FormValues, val: string) => void;
+  placeholder?: string;
+  rows?: number;
+}
+
+function TextAreaField({
+  label,
+  name,
+  value,
+  required,
+  error,
+  onChange,
+  placeholder,
+  rows = 3,
+}: TextAreaFieldProps) {
+  return (
+    <label className="ms-field ms-field-full">
+      <span>
+        {label}
+        {required && <b> *</b>}
+      </span>
+      <textarea
+        rows={rows}
+        value={String(value ?? "")}
+        placeholder={placeholder}
+        onChange={(e) => onChange(name, e.target.value)}
+        aria-invalid={Boolean(error)}
+      />
+      <small className="ms-counter">{String(value ?? "").length} / 2000</small>
+      {error && <small className="ms-error">{error}</small>}
+    </label>
+  );
+}
+
 export default function MilestoneForm({
   mode,
   milestoneId,
 }: MilestoneFormProps) {
+  const router = useRouter();
   const [step, setStep] = useState(0);
-  const [projectList, setProjectList] = useState<any[]>([]);
-  const [employeeList, setEmployeeList] = useState<any[]>([]);
   const [values, setValues] = useState<FormValues>(initialValues);
+  const [projectList, setProjectList] = useState<
+    { id: string; code: string; name: string; clientName: string }[]
+  >([]);
+  const [personnelList, setPersonnelList] = useState<
+    { id: string; name: string; email?: string }[]
+  >([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingPersonnel, setLoadingPersonnel] = useState(true);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [messageType, setMessageType] = useState<"success" | "error" | "info">("info");
 
+  // Load Real Personnel from DB (Active Users and Employees)
   useEffect(() => {
-    Promise.all([
-      projects().catch(() => []),
-      employees().catch(() => []),
-    ]).then(([pRes, eRes]: [any, any]) => {
-      const pList = Array.isArray(pRes) ? pRes : pRes?.items || [];
-      const eList = Array.isArray(eRes) ? eRes : eRes?.items || [];
-      if (pList.length > 0) {
-        setProjectList(pList);
-        setValues((prev) => ({ ...prev, projectId: prev.projectId || pList[0]._id || pList[0].id || "" }));
+    async function loadPersonnel() {
+      try {
+        setLoadingPersonnel(true);
+        const personnel = await milestoneApi.getPersonnel();
+        setPersonnelList(personnel);
+        if (personnel.length > 0) {
+          setValues((prev) => ({
+            ...prev,
+            owner: prev.owner || personnel[0].name,
+            requestedBy: prev.requestedBy || personnel[0].name,
+          }));
+        }
+      } catch (err) {
+        console.warn("Failed to load personnel:", err);
+      } finally {
+        setLoadingPersonnel(false);
       }
-      if (eList.length > 0) {
-        setEmployeeList(eList);
-        setValues((prev) => ({
-          ...prev,
-          owner: prev.owner || eList[0].name || `${eList[0].firstName || ""} ${eList[0].lastName || ""}`.trim() || eList[0].email,
-        }));
-      }
-    });
+    }
+    loadPersonnel();
   }, []);
 
-  const projectOptions = projectList.map((p: any) => ({
-    id: p._id || p.id,
-    name: p.projectName || p.name || "Project",
-  }));
+  // Load Projects from DB
+  useEffect(() => {
+    async function loadProjects() {
+      try {
+        setLoadingProjects(true);
+        const orgId = getOrganizationId();
+        const res: any = await getProjectsApi({ organizationId: orgId, limit: 100 });
+        const raw = Array.isArray(res) ? res : res?.items || res?.data || [];
+        const mapped = raw.map((p: any) => {
+          const client = p.clientId && typeof p.clientId === "object" ? p.clientId : null;
+          const clientName =
+            client?.displayName ||
+            client?.companyName ||
+            client?.legalName ||
+            (typeof p.clientName === "string" ? p.clientName : null) ||
+            "Direct Client";
+          return {
+            id: p._id || p.id,
+            code: p.projectCode || p.code || "PRJ",
+            name: p.projectName || p.name || "Untitled Project",
+            clientName,
+          };
+        });
+        setProjectList(mapped);
 
-  const ownerOptions = employeeList.map((e: any) =>
-    e.name || `${e.firstName || ""} ${e.lastName || ""}`.trim() || e.email
-  );
+        // Auto select first project if not selected
+        if (mapped.length > 0) {
+          setValues((prev) => ({
+            ...prev,
+            projectId: prev.projectId || mapped[0].id,
+          }));
+        }
+      } catch (err) {
+        console.warn("Failed to load projects:", err);
+      } finally {
+        setLoadingProjects(false);
+      }
+    }
+    loadProjects();
+  }, []);
 
-  const selectedProject = projectList.find(
-    (project: any) => (project._id || project.id) === values.projectId,
-  );
+  // In Create Mode, auto-generate Milestone Code
+  useEffect(() => {
+    async function loadCodeOrData() {
+      try {
+        setLoadingInitial(true);
+        if (mode === "create") {
+          const codeInfo = await milestoneApi.getNextCode();
+          if (codeInfo?.nextCode) {
+            setValues((prev) => ({ ...prev, milestoneId: codeInfo.nextCode }));
+          }
+        } else if (mode === "edit" && milestoneId) {
+          const m = await milestoneApi.get(milestoneId);
+          if (m) {
+            setValues({
+              projectId: m.projectId,
+              milestoneId: m.milestoneCode || m.id,
+              type: m.type,
+              module: (m as any).module || "Requirements Management",
+              title: m.title || m.name || "",
+              description: m.description || "",
+              priority: m.priority,
+              status: m.status,
+              plannedStart: m.plannedStart || "",
+              plannedEnd: m.plannedEnd || "",
+              baselineDuration: "0",
+              progress: m.progress || 0,
+              completionType: "Manual",
+              businessObjective: m.businessObjective || "",
+              acceptanceCriteria: m.acceptanceCriteria || "",
+              businessRules: m.businessRules || "",
+              dependencies: m.dependencies || "",
+              requestedBy: (m as any).requestedBy || m.owner.name || "",
+              owner: m.owner.name,
+              budget: String(m.weight || 10),
+              notes: (m as any).notes || "",
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to init milestone form:", err);
+      } finally {
+        setLoadingInitial(false);
+      }
+    }
+    loadCodeOrData();
+  }, [mode, milestoneId]);
+
+  const selectedProject = useMemo(() => {
+    return projectList.find((p) => p.id === values.projectId);
+  }, [projectList, values.projectId]);
+
+  const personnelOptions = useMemo(() => {
+    if (personnelList.length === 0) {
+      return [{ value: "", label: loadingPersonnel ? "Loading active personnel..." : "No personnel found" }];
+    }
+    return personnelList.map((p) => ({
+      value: p.name,
+      label: p.email ? `${p.name} (${p.email})` : p.name,
+    }));
+  }, [personnelList, loadingPersonnel]);
 
   const duration = useMemo(() => {
     if (!values.plannedStart || !values.plannedEnd) return 0;
@@ -196,13 +423,11 @@ export default function MilestoneForm({
     }
 
     if (currentStep === 2) {
-      if (values.businessObjective.trim().length < 10) {
-        nextErrors.businessObjective =
-          "Please provide at least 10 characters.";
+      if (values.businessObjective.trim().length < 5) {
+        nextErrors.businessObjective = "Please provide at least 5 characters.";
       }
-      if (values.acceptanceCriteria.trim().length < 10) {
-        nextErrors.acceptanceCriteria =
-          "Please provide at least 10 characters.";
+      if (values.acceptanceCriteria.trim().length < 5) {
+        nextErrors.acceptanceCriteria = "Please provide at least 5 characters.";
       }
     }
 
@@ -219,43 +444,114 @@ export default function MilestoneForm({
     setStep((previous) => Math.max(0, previous - 1));
   };
 
-  const handleSaveDraft = () => {
-    setSaveMessage(
-      "Draft is ready in this form. Connect the milestone API to persist it.",
-    );
-  };
-
-  const handleSubmit = async () => {
-    const allValid = [0, 1, 2, 3, 4].every(validateStep);
-
-    if (!allValid) {
-      const firstInvalid = [0, 1, 2, 3, 4].find(
-        (index) => !validateStep(index),
-      );
-      setStep(firstInvalid ?? 0);
+  const handleSaveDraft = async () => {
+    if (!values.title.trim()) {
+      setMessageType("error");
+      setSaveMessage("Please enter a Milestone Title to save a draft.");
+      return;
+    }
+    if (!values.projectId) {
+      setMessageType("error");
+      setSaveMessage("Please select a valid Project.");
       return;
     }
 
-    setSubmitting(true);
-    setSaveMessage("");
     try {
-      const payload: any = {
+      setIsSubmitting(true);
+      const matchedOwner = personnelList.find((p) => p.name === values.owner);
+      const payload = {
         name: values.title.trim(),
-        weight: Number(values.budget) || 10,
+        title: values.title.trim(),
+        milestoneCode: values.milestoneId,
         projectId: values.projectId,
+        type: values.type,
+        module: values.module,
+        description: values.description,
+        status: "Upcoming",
+        priority: values.priority,
+        plannedStart: values.plannedStart || undefined,
+        plannedEnd: values.plannedEnd || undefined,
+        progress: values.progress || 0,
+        weight: Number(values.budget) || 10,
+        ownerName: values.owner,
+        ownerId: matchedOwner?.id,
+        requestedBy: values.requestedBy,
+        businessObjective: values.businessObjective,
+        acceptanceCriteria: values.acceptanceCriteria,
       };
 
-      if (payload.projectId) {
-        await createMilestone(payload).catch((err) => {
-          console.warn("Milestone API call:", err);
-        });
+      if (mode === "edit" && milestoneId) {
+        await milestoneApi.update(milestoneId, payload);
+      } else {
+        await milestoneApi.create(payload);
       }
 
-      setSaveMessage("Milestone submitted and persisted successfully!");
+      setMessageType("success");
+      setSaveMessage("Draft milestone saved successfully into database!");
     } catch (err: any) {
-      setSaveMessage(err.message || "Failed to submit milestone.");
+      setMessageType("error");
+      setSaveMessage(`Draft save failed: ${err?.message || "Server error"}`);
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    const allValid = [0, 1, 2, 3].every(validateStep);
+
+    if (!allValid) {
+      const firstInvalid = [0, 1, 2, 3].find((index) => !validateStep(index));
+      setStep(firstInvalid ?? 0);
+      setMessageType("error");
+      setSaveMessage("Please complete all required fields before submitting.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const matchedOwner = personnelList.find((p) => p.name === values.owner);
+      const payload = {
+        name: values.title.trim(),
+        title: values.title.trim(),
+        milestoneCode: values.milestoneId,
+        projectId: values.projectId,
+        type: values.type,
+        module: values.module,
+        description: values.description,
+        status: values.status,
+        priority: values.priority,
+        plannedStart: values.plannedStart,
+        plannedEnd: values.plannedEnd,
+        progress: values.progress,
+        weight: Number(values.budget) || 10,
+        ownerName: values.owner,
+        ownerId: matchedOwner?.id,
+        businessObjective: values.businessObjective,
+        acceptanceCriteria: values.acceptanceCriteria,
+        businessRules: values.businessRules,
+        dependencies: values.dependencies,
+        requestedBy: values.requestedBy,
+        notes: values.notes,
+      };
+
+      if (mode === "edit" && milestoneId) {
+        await milestoneApi.update(milestoneId, payload);
+        setMessageType("success");
+        setSaveMessage("Milestone updated successfully! Redirecting...");
+      } else {
+        await milestoneApi.create(payload);
+        setMessageType("success");
+        setSaveMessage("Milestone registered successfully! Redirecting to Milestone Registry...");
+      }
+
+      setTimeout(() => {
+        router.push("/milestones");
+      }, 1200);
+    } catch (err: any) {
+      setMessageType("error");
+      setSaveMessage(`Submission error: ${err?.message || "Failed to persist milestone."}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -276,92 +572,6 @@ export default function MilestoneForm({
     setAttachments((previous) => previous.filter((_, i) => i !== index));
   };
 
-  const FieldError = ({ name }: { name: keyof FormValues }) =>
-    errors[name] ? <small className="ms-error">{errors[name]}</small> : null;
-
-  const TextField = ({
-    label,
-    name,
-    required,
-    placeholder,
-    type = "text",
-  }: {
-    label: string;
-    name: keyof FormValues;
-    required?: boolean;
-    placeholder?: string;
-    type?: string;
-  }) => (
-    <label className="ms-field">
-      <span>{label}{required && <b> *</b>}</span>
-      <input
-        type={type}
-        value={String(values[name])}
-        placeholder={placeholder}
-        onChange={(event) => update(name, event.target.value as never)}
-        aria-invalid={Boolean(errors[name])}
-      />
-      <FieldError name={name} />
-    </label>
-  );
-
-  const SelectField = ({
-    label,
-    name,
-    required,
-    options,
-  }: {
-    label: string;
-    name: keyof FormValues;
-    required?: boolean;
-    options: { label: string; value: string }[];
-  }) => (
-    <label className="ms-field">
-      <span>{label}{required && <b> *</b>}</span>
-      <select
-        value={String(values[name])}
-        onChange={(event) => update(name, event.target.value as never)}
-        aria-invalid={Boolean(errors[name])}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <FieldError name={name} />
-    </label>
-  );
-
-  const TextAreaField = ({
-    label,
-    name,
-    required,
-    placeholder,
-    rows = 3,
-  }: {
-    label: string;
-    name: keyof FormValues;
-    required?: boolean;
-    placeholder?: string;
-    rows?: number;
-  }) => (
-    <label className="ms-field ms-field-full">
-      <span>{label}{required && <b> *</b>}</span>
-      <textarea
-        rows={rows}
-        value={String(values[name])}
-        placeholder={placeholder}
-        onChange={(event) => update(name, event.target.value as never)}
-        aria-invalid={Boolean(errors[name])}
-      />
-      <small className="ms-counter">
-        {String(values[name]).length} / 2000
-      </small>
-      <FieldError name={name} />
-    </label>
-  );
-
   return (
     <section className="milestone-form-page">
       <div className="ms-top-heading">
@@ -369,9 +579,9 @@ export default function MilestoneForm({
           <div className="ms-title-row">
             <div className="ms-title-icon"><FileText size={20} /></div>
             <div>
-              <h1>{mode === "edit" ? "Edit Milestone" : "Create Milestone"}</h1>
+              <h1>{mode === "edit" ? "Edit Milestone" : "Create New Milestone"}</h1>
               <p>
-                {values.milestoneId} — {values.title || "New milestone"}
+                <strong>{values.milestoneId || "MLS-AUTO"}</strong> — {values.title || "New Project Milestone"}
                 <span className="ms-title-status">{values.status}</span>
               </p>
             </div>
@@ -379,14 +589,29 @@ export default function MilestoneForm({
         </div>
 
         <div className="ms-top-actions">
-          <button type="button" className="ms-btn" onClick={handleSaveDraft}>
-            <Save size={14} /> Save as Draft
+          <button
+            type="button"
+            disabled={isSubmitting}
+            className="ms-btn"
+            onClick={handleSaveDraft}
+          >
+            <Save size={14} /> Save Draft
           </button>
           <Link href="/milestones" className="ms-btn">
             <X size={14} /> Cancel
           </Link>
-          <button type="button" className="ms-btn ms-btn-primary" onClick={handleSubmit}>
-            Save Milestone
+          <button
+            type="button"
+            disabled={isSubmitting}
+            className="ms-btn ms-btn-primary"
+            onClick={handleSubmit}
+          >
+            {isSubmitting ? (
+              <RefreshCw size={14} className="animate-spin" />
+            ) : (
+              <Check size={14} />
+            )}
+            {mode === "edit" ? "Update Milestone" : "Submit Milestone"}
           </button>
         </div>
       </div>
@@ -412,8 +637,23 @@ export default function MilestoneForm({
       </nav>
 
       {saveMessage && (
-        <div className="ms-notice" role="status">
-          {saveMessage}
+        <div
+          className="ms-notice"
+          style={{
+            background: messageType === "success" ? "#ecfdf5" : messageType === "error" ? "#fef2f2" : "#eff6ff",
+            color: messageType === "success" ? "#065f46" : messageType === "error" ? "#991b1b" : "#1e40af",
+            border: messageType === "success" ? "1px solid #a7f3d0" : messageType === "error" ? "1px solid #fecaca" : "1px solid #bfdbfe",
+            padding: "12px 18px",
+            borderRadius: "8px",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+          }}
+          role="status"
+        >
+          {messageType === "success" ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}
+          <span>{saveMessage}</span>
         </div>
       )}
 
@@ -427,67 +667,148 @@ export default function MilestoneForm({
               </div>
 
               <div className="ms-form-grid">
-                <SelectField
-                  label="Project"
-                  name="projectId"
-                  required
-                  options={projectOptions.map((item) => ({
-                    value: item.id,
-                    label: `${item.id} - ${item.name}`,
-                  }))}
-                />
-                <TextField label="Milestone ID" name="milestoneId" required />
+                <div>
+                  <SelectField
+                    label="Target Project"
+                    name="projectId"
+                    value={values.projectId}
+                    error={errors.projectId}
+                    onChange={update}
+                    required
+                    options={
+                      projectList.length > 0
+                        ? projectList.map((item) => ({
+                            value: item.id,
+                            label: `${item.code} - ${item.name} (${item.clientName})`,
+                          }))
+                        : [{ label: "Loading active projects...", value: "" }]
+                    }
+                  />
+                  {selectedProject && (
+                    <div style={{ marginTop: "4px", fontSize: "12px", color: "#64748b" }}>
+                      Project: <strong>{selectedProject.name}</strong> · Client: <strong>{selectedProject.clientName}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <TextField
+                    label="Milestone Code (Auto-generated)"
+                    name="milestoneId"
+                    value={values.milestoneId}
+                    error={errors.milestoneId}
+                    onChange={update}
+                    required
+                    readOnly
+                    placeholder="Auto-generating MLS code..."
+                  />
+                  <div style={{ marginTop: "4px", fontSize: "11px", color: "#64748b" }}>
+                    Sequentially auto-generated for your organization
+                  </div>
+                </div>
+
                 <SelectField
                   label="Milestone Type"
                   name="type"
+                  value={values.type}
+                  error={errors.type}
+                  onChange={update}
                   required
-                  options={["Project", "Phase", "Sprint", "Release", "Operational"].map((item) => ({
+                  options={["Phase", "Project", "Sprint", "Release", "Operational"].map((item) => ({
                     value: item,
                     label: item,
                   }))}
                 />
-                <TextField label="Module / Area" name="module" required placeholder="e.g. Requirements Management" />
-                <TextField label="Title" name="title" required placeholder="Enter milestone title" />
+
+                <TextField
+                  label="Functional Module / Scope"
+                  name="module"
+                  value={values.module}
+                  error={errors.module}
+                  onChange={update}
+                  placeholder="e.g. Telehealth Video Signaling, Billing Engine..."
+                />
+
+                <div style={{ gridColumn: "span 2" }}>
+                  <TextField
+                    label="Milestone Title"
+                    name="title"
+                    value={values.title}
+                    error={errors.title}
+                    onChange={update}
+                    required
+                    placeholder="e.g. Phase 1: Core Architecture & Video Consultation Engine"
+                  />
+                </div>
+
                 <SelectField
                   label="Priority"
                   name="priority"
+                  value={values.priority}
+                  error={errors.priority}
+                  onChange={update}
                   required
                   options={["Critical", "High", "Medium", "Low"].map((item) => ({
                     value: item,
-                    label: item,
+                    label: `${item} Priority`,
                   }))}
                 />
-                <TextAreaField
-                  label="Description"
-                  name="description"
-                  placeholder="Describe the milestone and expected outcome..."
-                  rows={4}
-                />
+
                 <SelectField
                   label="Status"
                   name="status"
+                  value={values.status}
+                  error={errors.status}
+                  onChange={update}
                   required
                   options={STATUS_OPTIONS.map((item) => ({
                     value: item,
                     label: item,
                   }))}
                 />
+
+                <div style={{ gridColumn: "span 2" }}>
+                  <TextAreaField
+                    label="Detailed Scope / Description"
+                    name="description"
+                    value={values.description}
+                    error={errors.description}
+                    onChange={update}
+                    placeholder="Provide a comprehensive summary of what will be delivered in this milestone..."
+                  />
+                </div>
               </div>
             </section>
           )}
 
           {step === 1 && (
             <section className="ms-card">
-              <div className="ms-card-heading"><h2>Schedule & Progress</h2></div>
-              <div className="ms-form-grid ms-form-grid-four">
-                <TextField label="Planned Start Date" name="plannedStart" required type="date" />
-                <TextField label="Planned End Date" name="plannedEnd" required type="date" />
+              <div className="ms-card-heading"><h2>Schedule & Timeline</h2></div>
+              <div className="ms-form-grid">
+                <TextField
+                  label="Planned Start Date"
+                  name="plannedStart"
+                  value={values.plannedStart}
+                  error={errors.plannedStart}
+                  onChange={update}
+                  required
+                  type="date"
+                />
+                <TextField
+                  label="Planned Due Date"
+                  name="plannedEnd"
+                  value={values.plannedEnd}
+                  error={errors.plannedEnd}
+                  onChange={update}
+                  required
+                  type="date"
+                />
                 <label className="ms-field">
-                  <span>Baseline Duration (Days)</span>
-                  <input value={duration} readOnly />
+                  <span>Calculated Duration</span>
+                  <input type="text" value={`${duration} calendar days`} readOnly />
                 </label>
                 <label className="ms-field">
-                  <span>Progress (%)</span>
+                  <span>Current Progress (%)</span>
                   <input
                     type="number"
                     min={0}
@@ -497,21 +818,33 @@ export default function MilestoneForm({
                   />
                 </label>
                 <SelectField
-                  label="Completion Type"
+                  label="Completion Method"
                   name="completionType"
+                  value={values.completionType}
+                  error={errors.completionType}
+                  onChange={update}
                   options={[
-                    { value: "Manual", label: "Manual" },
-                    { value: "Automatic", label: "Automatic" },
-                    { value: "Deliverable Based", label: "Deliverable Based" },
+                    { value: "Manual", label: "Manual Sign-off" },
+                    { value: "Automatic", label: "Automatic Calculation" },
+                    { value: "Deliverable Based", label: "Deliverable Linked" },
                   ]}
+                />
+                <TextField
+                  label="Milestone Weight (Allocation %)"
+                  name="budget"
+                  value={values.budget}
+                  error={errors.budget}
+                  onChange={update}
+                  type="number"
+                  placeholder="10"
                 />
               </div>
               <div className="ms-progress-preview">
-                <div><span>Current progress</span><strong>{values.progress}%</strong></div>
+                <div><span>Configured progress</span><strong>{values.progress}%</strong></div>
                 <div className="ms-progress-track">
                   <span style={{ width: `${values.progress}%` }} />
                 </div>
-                <small>Progress may be calculated automatically when deliverables are linked.</small>
+                <small>Deliverables linked to this milestone will automatically increment completion status.</small>
               </div>
             </section>
           )}
@@ -519,26 +852,63 @@ export default function MilestoneForm({
           {step === 2 && (
             <>
               <section className="ms-card">
-                <div className="ms-card-heading"><h2>Business & Acceptance</h2></div>
+                <div className="ms-card-heading"><h2>Business Objectives & Acceptance Criteria</h2></div>
                 <div className="ms-form-grid">
-                  <TextAreaField label="Business Objective" name="businessObjective" required placeholder="What business outcome should this milestone achieve?" />
-                  <TextAreaField label="Acceptance Criteria" name="acceptanceCriteria" required placeholder="List the conditions that must be met..." />
-                  <TextAreaField label="Business Rules" name="businessRules" placeholder="Enter rules or constraints..." />
-                  <TextAreaField label="Dependencies" name="dependencies" placeholder="List milestone dependencies..." />
+                  <TextAreaField
+                    label="Business Objective"
+                    name="businessObjective"
+                    value={values.businessObjective}
+                    error={errors.businessObjective}
+                    onChange={update}
+                    required
+                    placeholder="Specify the business problem solved or milestone deliverable purpose..."
+                  />
+                  <TextAreaField
+                    label="Acceptance Criteria"
+                    name="acceptanceCriteria"
+                    value={values.acceptanceCriteria}
+                    error={errors.acceptanceCriteria}
+                    onChange={update}
+                    required
+                    placeholder="What conditions must pass for the client/management to sign off on this milestone?"
+                  />
+                  <TextAreaField
+                    label="Business Rules & Constraints"
+                    name="businessRules"
+                    value={values.businessRules}
+                    error={errors.businessRules}
+                    onChange={update}
+                    placeholder="Compliance standards, HIPAA, ABDM, data residency or performance limits..."
+                  />
+                  <TextAreaField
+                    label="Dependencies"
+                    name="dependencies"
+                    value={values.dependencies}
+                    error={errors.dependencies}
+                    onChange={update}
+                    placeholder="Previous milestones or third-party deliverables required before this milestone starts..."
+                  />
                 </div>
               </section>
 
               <section className="ms-card">
                 <div className="ms-card-heading">
-                  <h2>Dependencies & Deliverables</h2>
-                  <button type="button" className="ms-btn" onClick={() => setSaveMessage("Deliverable linking will be connected to the deliverables module.")}>
-                    <Plus size={14} /> Add Deliverable
+                  <h2>Deliverables Mapping</h2>
+                  <button
+                    type="button"
+                    className="ms-btn"
+                    onClick={() => {
+                      setMessageType("info");
+                      setSaveMessage("Deliverables will be automatically associated from the Deliverable Register.");
+                    }}
+                  >
+                    <Plus size={14} /> Link Deliverable
                   </button>
                 </div>
                 <div className="ms-empty-link">
                   <FileText size={23} />
                   <strong>No deliverables linked yet</strong>
-                  <span>Link documents, tasks or outputs required to complete this milestone.</span>
+                  <span>Outputs, SRS documents, and build artifacts will appear here once linked.</span>
                 </div>
               </section>
             </>
@@ -546,23 +916,34 @@ export default function MilestoneForm({
 
           {step === 3 && (
             <section className="ms-card">
-              <div className="ms-card-heading"><h2>Resources & Budget</h2></div>
+              <div className="ms-card-heading"><h2>Resources & Ownership</h2></div>
               <div className="ms-form-grid">
                 <SelectField
-                  label="Milestone Owner"
+                  label="Milestone Lead / Owner"
                   name="owner"
+                  value={values.owner}
+                  error={errors.owner}
+                  onChange={update}
                   required
-                  options={ownerOptions.map((name) => ({ value: name, label: name }))}
+                  options={personnelOptions}
                 />
-                <TextField label="Estimated Budget (INR)" name="budget" type="number" />
+                <TextField
+                  label="Estimated Cost / Budget (INR)"
+                  name="budget"
+                  value={values.budget}
+                  error={errors.budget}
+                  onChange={update}
+                  type="number"
+                  placeholder="0"
+                />
                 <label className="ms-field ms-field-full">
                   <span>Resource Notes</span>
-                  <textarea rows={4} placeholder="Describe required people, equipment or other resources..." />
+                  <textarea rows={4} placeholder="Describe engineering team allocation, QA resources, or client POC..." />
                 </label>
               </div>
               <div className="ms-info-note">
                 <ShieldCheck size={17} />
-                Resource allocation and budget approvals will follow the project's access permissions.
+                Resource assignment will notify the assigned lead for execution and deliverable verification.
               </div>
             </section>
           )}
@@ -570,24 +951,37 @@ export default function MilestoneForm({
           {step === 4 && (
             <>
               <section className="ms-card">
-                <div className="ms-card-heading"><h2>Additional Information</h2></div>
+                <div className="ms-card-heading"><h2>Additional Metadata</h2></div>
                 <div className="ms-form-grid">
                   <SelectField
                     label="Requested By"
                     name="requestedBy"
-                    options={ownerOptions.map((name) => ({ value: name, label: name }))}
+                    value={values.requestedBy}
+                    error={errors.requestedBy}
+                    onChange={update}
+                    options={personnelOptions}
                   />
                   <SelectField
                     label="Milestone Owner"
                     name="owner"
-                    options={ownerOptions.map((name) => ({ value: name, label: name }))}
+                    value={values.owner}
+                    error={errors.owner}
+                    onChange={update}
+                    options={personnelOptions}
                   />
-                  <TextAreaField label="Additional Notes" name="notes" placeholder="Add relevant notes or instructions..." />
+                  <TextAreaField
+                    label="Additional Notes"
+                    name="notes"
+                    value={values.notes}
+                    error={errors.notes}
+                    onChange={update}
+                    placeholder="Any special notes or client instructions..."
+                  />
                 </div>
               </section>
 
               <section className="ms-card">
-                <div className="ms-card-heading"><h2>Attachments</h2></div>
+                <div className="ms-card-heading"><h2>Attachments & Specification References</h2></div>
                 <label className="ms-upload-zone">
                   <Upload size={23} />
                   <strong>Drag & drop files here or click to browse</strong>
@@ -615,28 +1009,31 @@ export default function MilestoneForm({
 
           {step === 5 && (
             <section className="ms-card">
-              <div className="ms-card-heading"><h2>Review & Submit</h2></div>
+              <div className="ms-card-heading"><h2>Review & Confirm Milestone</h2></div>
               <div className="ms-review-grid">
-                <div><span>Milestone ID</span><strong>{values.milestoneId}</strong></div>
-                <div><span>Title</span><strong>{values.title || "—"}</strong></div>
-                <div><span>Project</span><strong>{selectedProject?.name ?? values.projectId}</strong></div>
+                <div><span>Milestone Code</span><strong>{values.milestoneId || "MLS-AUTO"}</strong></div>
+                <div><span>Milestone Title</span><strong>{values.title || "—"}</strong></div>
+                <div>
+                  <span>Project</span>
+                  <strong>{selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : values.projectId}</strong>
+                </div>
+                <div><span>Client</span><strong>{selectedProject?.clientName || "Direct"}</strong></div>
                 <div><span>Type</span><strong>{values.type}</strong></div>
                 <div><span>Priority</span><strong>{values.priority}</strong></div>
                 <div><span>Status</span><strong>{values.status}</strong></div>
                 <div><span>Planned Start</span><strong>{values.plannedStart || "—"}</strong></div>
                 <div><span>Planned End</span><strong>{values.plannedEnd || "—"}</strong></div>
                 <div><span>Duration</span><strong>{duration} days</strong></div>
-                <div><span>Progress</span><strong>{values.progress}%</strong></div>
-                <div><span>Owner</span><strong>{values.owner}</strong></div>
-                <div><span>Budget</span><strong>₹{Number(values.budget || 0).toLocaleString("en-IN")}</strong></div>
+                <div><span>Current Progress</span><strong>{values.progress}%</strong></div>
+                <div><span>Owner / Lead</span><strong>{values.owner}</strong></div>
               </div>
               <div className="ms-review-description">
-                <strong>Description</strong>
+                <strong>Scope Description</strong>
                 <p>{values.description || "No description provided."}</p>
               </div>
               <div className="ms-info-note">
                 <ShieldCheck size={17} />
-                Review the milestone information before submitting it for the configured approval workflow.
+                Clicking Submit will register this milestone dynamically in the PMS database and bind it to the project baseline.
               </div>
             </section>
           )}
@@ -644,8 +1041,13 @@ export default function MilestoneForm({
           <div className="ms-bottom-actions">
             <Link href="/milestones" className="ms-btn">Cancel</Link>
             <div>
-              <button type="button" className="ms-btn" onClick={handleSaveDraft}>
-                <Save size={14} /> Save as Draft
+              <button
+                type="button"
+                disabled={isSubmitting}
+                className="ms-btn"
+                onClick={handleSaveDraft}
+              >
+                <Save size={14} /> Save Draft
               </button>
               {step > 0 && (
                 <button type="button" className="ms-btn" onClick={goPrevious}>
@@ -657,8 +1059,18 @@ export default function MilestoneForm({
                   Next: {steps[step + 1]} <ArrowRight size={14} />
                 </button>
               ) : (
-                <button type="button" className="ms-btn ms-btn-primary" onClick={handleSubmit}>
-                  {mode === "edit" ? "Update Milestone" : "Submit Milestone"}
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  className="ms-btn ms-btn-primary"
+                  onClick={handleSubmit}
+                >
+                  {isSubmitting ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Check size={14} />
+                  )}
+                  {mode === "edit" ? "Update Milestone" : "Register Milestone"}
                 </button>
               )}
             </div>
@@ -669,9 +1081,16 @@ export default function MilestoneForm({
           <section className="ms-card ms-summary-card">
             <h2>Milestone Summary</h2>
             <dl>
-              <div><dt>Milestone ID</dt><dd>{values.milestoneId || "—"}</dd></div>
+              <div><dt>Milestone Code</dt><dd>{values.milestoneId || "MLS-AUTO"}</dd></div>
               <div><dt>Title</dt><dd>{values.title || "—"}</dd></div>
-              <div><dt>Project</dt><dd>{values.projectId} - {selectedProject?.name}</dd></div>
+              <div>
+                <dt>Project</dt>
+                <dd>{selectedProject ? selectedProject.name : "Not selected"}</dd>
+              </div>
+              <div>
+                <dt>Client</dt>
+                <dd>{selectedProject ? selectedProject.clientName : "Direct"}</dd>
+              </div>
               <div><dt>Milestone Type</dt><dd>{values.type}</dd></div>
               <div><dt>Priority</dt><dd>{values.priority}</dd></div>
               <div><dt>Status</dt><dd>{values.status}</dd></div>
@@ -683,26 +1102,25 @@ export default function MilestoneForm({
           </section>
 
           <section className="ms-card ms-approval-card">
-            <h2>Approval Status</h2>
+            <h2>Workflow Status</h2>
             {[
-              ["Not Submitted", "Milestone not submitted for approval", "pending"],
-              ["Submitted", "Pending approval", "active"],
-              ["Approved", "Approved by all required approvers", "success"],
-              ["Rejected", "Returned for changes", "danger"],
-              ["Obsolete", "Milestone no longer applicable", "pending"],
-            ].map(([title, description, state]) => (
+              ["Planned / Draft", "Milestone created and baseline scheduled", values.status === "Upcoming" ? "active" : "pending"],
+              ["Execution", "Deliverables in progress", values.status === "In Progress" ? "active" : "pending"],
+              ["Sign-off / Done", "All acceptance criteria verified", values.status === "Completed" ? "success" : "pending"],
+              ["At Risk / Overdue", "Schedule slippage detected", values.status === "At Risk" || values.status === "Overdue" ? "danger" : "pending"],
+            ].map(([title, desc, state]) => (
               <div className={`ms-approval-step ${state}`} key={title}>
                 <span />
-                <div><strong>{title}</strong><small>{description}</small></div>
+                <div><strong>{title}</strong><small>{desc}</small></div>
               </div>
             ))}
           </section>
 
           <section className="ms-card ms-quick-card">
             <h2>Quick Actions</h2>
-            <Link href="/milestones/calendar"><CalendarDays size={16} /> View Milestone Calendar</Link>
-            <Link href="/milestones/timeline"><Clock3 size={16} /> View Milestone Timeline</Link>
-            <Link href="/milestones/reports"><FileText size={16} /> View Milestone Report</Link>
+            <Link href="/milestones"><FolderKanban size={16} /> Milestone Registry</Link>
+            <Link href="/milestones/timeline"><Clock3 size={16} /> Milestone Timeline</Link>
+            <Link href="/milestones/calendar"><CalendarDays size={16} /> Milestone Calendar</Link>
           </section>
         </aside>
       </div>

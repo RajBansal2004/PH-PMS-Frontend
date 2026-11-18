@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -14,34 +15,55 @@ import {
   ZoomOut,
   FileText,
   MoreHorizontal,
+  RefreshCw,
+  FolderKanban,
 } from "lucide-react";
-import { milestones as getMilestones } from "@/lib/api";
+import { milestoneApi } from "../../lib/milestones/api";
+import type { Milestone as ApiMilestone, MilestoneStatus } from "../../lib/milestones/types";
 import "./milestone-timeline.css";
 
-type Status = "Completed" | "In Progress" | "Upcoming" | "Overdue";
-
-type Milestone = {
+type TimelineItem = {
   id: string;
+  rawId: string;
   title: string;
   start: string;
   end: string;
   days: number;
-  status: Status;
+  status: MilestoneStatus;
   progress: number;
   owner: string;
+  projectName: string;
+  projectCode: string;
+  module: string;
   predecessor?: string;
 };
 
-const S = (s: Status) => s.toLowerCase().replace(" ", "-");
+const S = (s: string) => s.toLowerCase().replace(" ", "-");
 
-const short = (d: string) =>
-  new Date(d + "T00:00:00").toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-  });
+const short = (d: string) => {
+  if (!d) return "—";
+  try {
+    return new Date(d + "T00:00:00").toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+    });
+  } catch {
+    return d;
+  }
+};
 
-const start = new Date("2025-04-20T00:00:00").getTime();
-const span = 163 * 86400000;
+const formatFullDate = (d: string) => {
+  if (!d) return "—";
+  try {
+    return new Date(d + "T00:00:00").toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return d;
+  }
+};
 
 function Stat({
   label,
@@ -68,115 +90,169 @@ function Stat({
   );
 }
 
-function Pill({ status }: { status: Status }) {
+function Pill({ status }: { status: string }) {
   return <em className={`ml-pill ${S(status)}`}>{status}</em>;
 }
 
 export default function MilestoneTimeline() {
-  const [data, setData] = useState<Milestone[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"timeline" | "dependency" | "list">(
-    "timeline"
-  );
+  const [tab, setTab] = useState<"timeline" | "dependency" | "list">("timeline");
   const [scale, setScale] = useState("Weeks");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
   const [filters, setFilters] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [milestones, setMilestones] = useState<ApiMilestone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
-    async function fetchTimeline() {
-      setLoading(true);
-      try {
-        const res = await getMilestones();
-        const list = Array.isArray(res) ? res : (res as any)?.items || [];
-        const mapped: Milestone[] = list.map((m: any, idx: number) => {
-          let mappedStatus: Status = "In Progress";
-          const rawSt = String(m.status || "").toUpperCase();
-          if (rawSt === "COMPLETED") mappedStatus = "Completed";
-          else if (
-            rawSt === "UPCOMING" ||
-            rawSt === "NOT STARTED" ||
-            rawSt === "PLANNED"
-          )
-            mappedStatus = "Upcoming";
-          else if (rawSt === "OVERDUE") mappedStatus = "Overdue";
+    let isMounted = true;
+    setLoading(true);
+    milestoneApi
+      .list()
+      .then((res) => {
+        if (isMounted) {
+          setMilestones(res?.items || []);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to load timeline milestones:", err);
+        if (isMounted) setMilestones([]);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
 
-          const startDate = m.startDate
-            ? m.startDate.slice(0, 10)
-            : new Date().toISOString().slice(0, 10);
-          const endDate = m.endDate
-            ? m.endDate.slice(0, 10)
-            : new Date(Date.now() + 15 * 86400000).toISOString().slice(0, 10);
-          const days = Math.max(
-            1,
-            Math.ceil(
-              (new Date(endDate).getTime() - new Date(startDate).getTime()) /
-                86400000
-            )
-          );
-
-          return {
-            id: m.code || `MLS-${String(idx + 1).padStart(3, "0")}`,
-            title: m.name || m.title || "Milestone",
-            start: startDate,
-            end: endDate,
-            days,
-            status: mappedStatus,
-            progress: m.weight || m.progress || 0,
-            owner: m.owner?.name || "Admin",
-          };
-        });
-        setData(mapped);
-      } catch (err) {
-        console.warn("Failed to fetch milestone timeline:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchTimeline();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const rows = useMemo(
-    () =>
-      data.filter(
-        (m) =>
-          (m.id + " " + m.title + " " + m.owner)
-            .toLowerCase()
-            .includes(query.toLowerCase()) &&
-          (status === "All" || m.status === status)
-      ),
-    [data, query, status]
-  );
+  const items: TimelineItem[] = useMemo(() => {
+    return milestones.map((m) => {
+      const start = m.plannedStart || new Date().toISOString().slice(0, 10);
+      const end = m.plannedEnd || start;
+      const sDate = new Date(`${start}T00:00:00`).getTime();
+      const eDate = new Date(`${end}T00:00:00`).getTime();
+      const days = Math.max(1, Math.ceil((eDate - sDate) / 86400000) + 1);
 
-  const counts = (s: Status) =>
-    data.filter((m) => m.status === s).length;
+      return {
+        id: m.milestoneCode || m.id,
+        rawId: m._id || m.id,
+        title: m.title || "Untitled Milestone",
+        start,
+        end,
+        days: Number.isFinite(days) ? days : 15,
+        status: m.status,
+        progress: m.progress || 0,
+        owner: m.owner?.name || "Unassigned",
+        projectName: m.projectName || "General Project",
+        projectCode: m.projectCode || "PRJ",
+        module: (m as any).module || "Core Scope",
+        predecessor: m.dependencies ? m.dependencies.split(",")[0]?.trim() : undefined,
+      };
+    });
+  }, [milestones]);
+
+  const rows = useMemo(() => {
+    return items.filter((m) => {
+      const matchesQuery =
+        !query.trim() ||
+        (m.id + " " + m.title + " " + m.owner + " " + m.projectName)
+          .toLowerCase()
+          .includes(query.toLowerCase());
+      const matchesStatus = statusFilter === "All" || m.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [items, query, statusFilter]);
+
+  const selectedItem = rows[selectedIndex] || items[0] || null;
+
+  // Compute dynamic timeline boundaries
+  const { timelineStart, timelineSpan, monthLabels } = useMemo(() => {
+    if (items.length === 0) {
+      const now = new Date();
+      const startMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const spanMs = 150 * 86400000;
+      return {
+        timelineStart: startMs,
+        timelineSpan: spanMs,
+        monthLabels: ["Month 1", "Month 2", "Month 3", "Month 4", "Month 5"],
+      };
+    }
+
+    const startTimes = items.map((i) => new Date(`${i.start}T00:00:00`).getTime());
+    const endTimes = items.map((i) => new Date(`${i.end}T00:00:00`).getTime());
+    const minStart = Math.min(...startTimes);
+    const maxEnd = Math.max(...endTimes);
+
+    // Buffer by 5 days on start and 15 days on end
+    const startMs = minStart - 5 * 86400000;
+    const spanMs = Math.max(30 * 86400000, maxEnd - startMs + 15 * 86400000);
+
+    const labels: string[] = [];
+    const curr = new Date(startMs);
+    for (let k = 0; k < 5; k++) {
+      labels.push(
+        curr.toLocaleDateString("en-GB", { month: "short", year: "numeric" })
+      );
+      curr.setMonth(curr.getMonth() + 1);
+    }
+
+    return {
+      timelineStart: startMs,
+      timelineSpan: spanMs,
+      monthLabels: labels,
+    };
+  }, [items]);
+
+  const counts = (s: MilestoneStatus) =>
+    items.filter((m) => m.status === s).length;
+
+  const total = items.length;
+  const completedCount = counts("Completed");
+  const inProgressCount = counts("In Progress");
+  const upcomingCount = counts("Upcoming");
+  const overdueCount = counts("Overdue") + counts("At Risk");
 
   const exportCSV = () => {
     const csv = [
-      ["ID", "Title", "Start", "End", "Days", "Status", "Progress", "Owner"],
+      ["Milestone ID", "Title", "Start Date", "End Date", "Duration (Days)", "Status", "Progress", "Owner", "Project"],
       ...rows.map((m) => [
         m.id,
-        m.title,
+        `"${m.title.replace(/"/g, '""')}"`,
         m.start,
         m.end,
         m.days,
         m.status,
         m.progress + "%",
-        m.owner,
+        `"${m.owner}"`,
+        `"${m.projectName}"`,
       ]),
     ]
       .map((r) => r.join(","))
       .join("\n");
 
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(
-      new Blob([csv], { type: "text/csv" })
-    );
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = "milestone-timeline.csv";
     a.click();
     URL.revokeObjectURL(a.href);
   };
+
+  if (loading) {
+    return (
+      <div style={{ padding: "80px 24px", textAlign: "center", color: "#64748b" }}>
+        <RefreshCw size={32} className="animate-spin" style={{ margin: "0 auto 16px", color: "#3b82f6" }} />
+        <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>
+          Loading Milestone Gantt Schedule...
+        </h3>
+        <p style={{ fontSize: "13px", color: "#94a3b8", margin: 0 }}>
+          Calculating chronological dependency paths and baseline timelines from database.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="ml-page">
@@ -184,69 +260,75 @@ export default function MilestoneTimeline() {
         <CalendarDays />
 
         <div>
-          <h1>MLS-004 — Milestone Dependency / Timeline</h1>
+          <h1>
+            {selectedItem
+              ? `${selectedItem.id} — ${selectedItem.title}`
+              : "Milestone Schedule & Timeline"}
+          </h1>
 
           <p>
-            Project: <b>PRJ-001 - AI-CMS Platform</b>
+            Project: <b>{selectedItem ? `${selectedItem.projectCode} - ${selectedItem.projectName}` : "All Active Projects"}</b>
             <span>
-              Module: <b>Requirements Management</b>
+              Module: <b>{selectedItem?.module || "Functional Requirements"}</b>
             </span>
-            <Pill status="In Progress" />
+            {selectedItem && <Pill status={selectedItem.status} />}
           </p>
         </div>
 
         <div className="ml-actions">
-          <button>
-            <FileText size={14} /> Edit Milestone
+          {selectedItem && (
+            <Link href={`/milestones/${encodeURIComponent(selectedItem.rawId)}/edit`} className="ms-btn" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <FileText size={14} /> Edit Milestone
+            </Link>
+          )}
+
+          <button onClick={exportCSV} type="button">
+            <Download size={14} /> Export CSV
           </button>
 
-          <button onClick={exportCSV}>
-            <Download size={14} /> Export
-          </button>
-
-          <button>
-            <MoreHorizontal size={15} /> More Actions
-          </button>
+          <Link href="/milestones/new" style={{ padding: "8px 14px", background: "#1d4ed8", color: "#fff", borderRadius: "6px", textDecoration: "none", fontSize: "12.5px", fontWeight: 600 }}>
+            + New Milestone
+          </Link>
         </div>
       </header>
 
       <section className="ml-stats">
         <Stat
           label="Total Milestones"
-          value={10}
-          note="Across all phases"
+          value={total}
+          note="Across active projects"
           icon={<Flag />}
           tone="blue"
         />
 
         <Stat
           label="Completed"
-          value={counts("Completed")}
-          note="30%"
+          value={completedCount}
+          note={`${total ? Math.round((completedCount / total) * 100) : 0}%`}
           icon={<CheckCircle2 />}
           tone="green"
         />
 
         <Stat
           label="In Progress"
-          value={counts("In Progress")}
-          note="20%"
+          value={inProgressCount}
+          note={`${total ? Math.round((inProgressCount / total) * 100) : 0}%`}
           icon={<Clock3 />}
           tone="orange"
         />
 
         <Stat
           label="Upcoming"
-          value={counts("Upcoming")}
-          note="40%"
+          value={upcomingCount}
+          note={`${total ? Math.round((upcomingCount / total) * 100) : 0}%`}
           icon={<CalendarDays />}
           tone="blue"
         />
 
         <Stat
-          label="Overdue"
-          value={counts("Overdue")}
-          note="10%"
+          label="Overdue / At Risk"
+          value={overdueCount}
+          note={`${total ? Math.round((overdueCount / total) * 100) : 0}%`}
           icon={<Activity />}
           tone="red"
         />
@@ -255,7 +337,7 @@ export default function MilestoneTimeline() {
       <nav className="ml-tabs">
         {(
           [
-            ["timeline", "Timeline View"],
+            ["timeline", "Timeline View (Gantt)"],
             ["dependency", "Dependency View"],
             ["list", "List View"],
           ] as const
@@ -264,6 +346,7 @@ export default function MilestoneTimeline() {
             className={tab === v ? "active" : ""}
             onClick={() => setTab(v)}
             key={v}
+            type="button"
           >
             {l}
           </button>
@@ -280,36 +363,36 @@ export default function MilestoneTimeline() {
 
                   <div className="ml-tools">
                     <button
+                      type="button"
                       onClick={() => {
                         setQuery("");
-                        setStatus("All");
+                        setStatusFilter("All");
                       }}
                     >
-                      Today
+                      Reset
                     </button>
 
                     <button
-                      onClick={() =>
-                        setZoom((z) => Math.max(0.7, z - 0.15))
-                      }
+                      type="button"
+                      onClick={() => setZoom((z) => Math.max(0.7, z - 0.15))}
                     >
                       <ZoomOut size={14} />
                     </button>
 
                     <button
-                      onClick={() =>
-                        setZoom((z) => Math.min(1.7, z + 0.15))
-                      }
+                      type="button"
+                      onClick={() => setZoom((z) => Math.min(1.7, z + 0.15))}
                     >
                       <ZoomIn size={14} />
                     </button>
 
-                    <button onClick={() => setZoom(1)}>Fit</button>
+                    <button type="button" onClick={() => setZoom(1)}>Fit</button>
 
                     <span className="ml-spacer" />
 
                     {["Days", "Weeks", "Months"].map((v) => (
                       <button
+                        type="button"
                         className={scale === v ? "selected" : ""}
                         onClick={() => setScale(v)}
                         key={v}
@@ -318,7 +401,7 @@ export default function MilestoneTimeline() {
                       </button>
                     ))}
 
-                    <button onClick={() => setFilters(!filters)}>
+                    <button type="button" onClick={() => setFilters(!filters)}>
                       <Filter size={13} /> Filters
                     </button>
                   </div>
@@ -329,115 +412,128 @@ export default function MilestoneTimeline() {
                     <label>
                       <Search size={14} />
                       <input
-                        placeholder="Search milestones"
+                        placeholder="Search by title, owner, ID..."
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                       />
                     </label>
 
                     <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
                     >
-                      <option>All</option>
+                      <option value="All">All Statuses</option>
                       {[
                         "Completed",
                         "In Progress",
                         "Upcoming",
+                        "At Risk",
                         "Overdue",
                       ].map((s) => (
-                        <option key={s}>{s}</option>
+                        <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </div>
                 )}
 
-                <div className="ml-gantt-scroll">
-                  <div
-                    className="ml-gantt"
-                    style={{ "--zoom": zoom } as React.CSSProperties}
-                  >
-                    <div className="ml-left">
-                      <div className="ml-gantt-head">
-                        <span>Milestone ID</span>
-                        <span>Milestone Title</span>
-                        <span>Start Date</span>
-                        <span>End Date</span>
-                        <span>Duration</span>
-                        <span>Status</span>
-                      </div>
-
-                      {rows.map((m) => (
-                        <div className="ml-data-row" key={m.id}>
-                          <b>{m.id}</b>
-                          <span>{m.title}</span>
-                          <span>{short(m.start)}</span>
-                          <span>{short(m.end)}</span>
-                          <span>{m.days}d</span>
-                          <Pill status={m.status} />
+                {rows.length === 0 ? (
+                  <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+                    <p style={{ margin: 0, fontSize: "14px" }}>
+                      No milestones match the selected filters.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="ml-gantt-scroll">
+                    <div
+                      className="ml-gantt"
+                      style={{ "--zoom": zoom } as React.CSSProperties}
+                    >
+                      <div className="ml-left">
+                        <div className="ml-gantt-head">
+                          <span>Milestone ID</span>
+                          <span>Milestone Title</span>
+                          <span>Start Date</span>
+                          <span>End Date</span>
+                          <span>Duration</span>
+                          <span>Status</span>
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="ml-chart">
-                      <div className="ml-months">
-                        {[
-                          "May 2025",
-                          "Jun 2025",
-                          "Jul 2025",
-                          "Aug 2025",
-                          "Sep 2025",
-                        ].map((m) => (
-                          <span key={m}>{m}</span>
-                        ))}
-                      </div>
-
-                      <div className="ml-weeks">
-                        {Array.from({ length: 24 }, (_, i) => (
-                          <span key={i}>
-                            {String((i * 7) % 31 + 1).padStart(2, "0")}
-                          </span>
-                        ))}
-                      </div>
-
-                      {rows.map((m) => (
-                        <div className="ml-chart-row" key={m.id}>
+                        {rows.map((m, idx) => (
                           <div
-                            className={`ml-bar ${S(m.status)}`}
-                            style={{
-                              left: `${
-                                ((new Date(m.start + "T00:00:00").getTime() -
-                                  start) /
-                                  span) *
-                                100
-                              }%`,
-                              width: `${Math.max(
-                                1.4,
-                                (m.days / 163) * 100
-                              )}%`,
-                            }}
+                            className={`ml-data-row ${idx === selectedIndex ? "is-selected" : ""}`}
+                            key={m.id}
+                            style={{ cursor: "pointer" }}
+                            onClick={() => setSelectedIndex(idx)}
                           >
-                            <i style={{ width: m.progress + "%" }} />
-                            <small>
-                              {m.progress ? m.progress + "%" : ""}
-                            </small>
+                            <b>
+                              <Link href={`/milestones/${encodeURIComponent(m.rawId)}`} style={{ color: "#1d4ed8", textDecoration: "none" }}>
+                                {m.id}
+                              </Link>
+                            </b>
+                            <span title={m.title}>{m.title}</span>
+                            <span>{short(m.start)}</span>
+                            <span>{short(m.end)}</span>
+                            <span>{m.days}d</span>
+                            <Pill status={m.status} />
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
 
-                      <div className="ml-today">
-                        <span>Today</span>
+                      <div className="ml-chart">
+                        <div className="ml-months">
+                          {monthLabels.map((m) => (
+                            <span key={m}>{m}</span>
+                          ))}
+                        </div>
+
+                        <div className="ml-weeks">
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <span key={i}>
+                              {String(((i * 7) % 31) + 1).padStart(2, "0")}
+                            </span>
+                          ))}
+                        </div>
+
+                        {rows.map((m) => {
+                          const mStart = new Date(`${m.start}T00:00:00`).getTime();
+                          const leftPct = Math.max(
+                            0,
+                            Math.min(95, ((mStart - timelineStart) / timelineSpan) * 100)
+                          );
+                          const widthPct = Math.max(
+                            2.5,
+                            Math.min(95 - leftPct, ((m.days * 86400000) / timelineSpan) * 100)
+                          );
+
+                          return (
+                            <div className="ml-chart-row" key={m.id}>
+                              <div
+                                className={`ml-bar ${S(m.status)}`}
+                                style={{
+                                  left: `${leftPct}%`,
+                                  width: `${widthPct}%`,
+                                }}
+                              >
+                                <i style={{ width: `${m.progress}%` }} />
+                                <small>
+                                  {m.progress ? `${m.progress}%` : ""}
+                                </small>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <div className="ml-today">
+                          <span>Today</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 <div className="ml-legend">
                   <b>Legend:</b>
-                  <span>━━ Finish to Start (FS)</span>
-                  <span>┄┄ Start to Start (SS)</span>
-                  <span>┄┄ Finish to Finish (FF)</span>
-                  <span>┄┄ Start to Finish (SF)</span>
+                  <span>━━ Milestone Baseline Sequence</span>
                   <span className="dot green" /> Completed
                   <span className="dot orange" /> In Progress
                   <span className="dot blue" /> Upcoming
@@ -446,45 +542,46 @@ export default function MilestoneTimeline() {
               </section>
 
               <div className="ml-lower">
-                <Dependency />
+                <Dependency items={items} />
 
                 <div className="ml-stack">
-                  <FloatTable data={data} />
-                  <Baseline />
+                  <FloatTable items={items} />
+                  <Baseline item={selectedItem} />
                 </div>
               </div>
             </>
           )}
 
-          {tab === "dependency" && <Dependency large />}
+          {tab === "dependency" && <Dependency items={items} large />}
 
           {tab === "list" && (
             <section className="ml-card">
               <div className="ml-card-head">
-                <h2>Milestone List</h2>
+                <h2>Milestone Registry List</h2>
 
                 <div className="ml-tools">
                   <label className="ml-search">
                     <Search size={14} />
                     <input
-                      placeholder="Search"
+                      placeholder="Search milestones..."
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                     />
                   </label>
 
                   <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
                   >
-                    <option>All</option>
+                    <option value="All">All Statuses</option>
                     {[
                       "Completed",
                       "In Progress",
                       "Upcoming",
+                      "At Risk",
                       "Overdue",
                     ].map((s) => (
-                      <option key={s}>{s}</option>
+                      <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
                 </div>
@@ -502,7 +599,7 @@ export default function MilestoneTimeline() {
                         "Duration",
                         "Status",
                         "Progress",
-                        "Owner",
+                        "Lead / Owner",
                       ].map((x) => (
                         <th key={x}>{x}</th>
                       ))}
@@ -510,20 +607,32 @@ export default function MilestoneTimeline() {
                   </thead>
 
                   <tbody>
-                    {rows.map((m) => (
-                      <tr key={m.id}>
-                        <td className="ml-link">{m.id}</td>
-                        <td>{m.title}</td>
-                        <td>{m.start}</td>
-                        <td>{m.end}</td>
-                        <td>{m.days} days</td>
-                        <td>
-                          <Pill status={m.status} />
+                    {rows.length > 0 ? (
+                      rows.map((m) => (
+                        <tr key={m.id}>
+                          <td className="ml-link">
+                            <Link href={`/milestones/${encodeURIComponent(m.rawId)}`}>
+                              {m.id}
+                            </Link>
+                          </td>
+                          <td><strong>{m.title}</strong></td>
+                          <td>{formatFullDate(m.start)}</td>
+                          <td>{formatFullDate(m.end)}</td>
+                          <td>{m.days} days</td>
+                          <td>
+                            <Pill status={m.status} />
+                          </td>
+                          <td>{m.progress}%</td>
+                          <td>{m.owner}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} style={{ textAlign: "center", padding: "24px", color: "#64748b" }}>
+                          No milestones recorded in the current project registry.
                         </td>
-                        <td>{m.progress}%</td>
-                        <td>{m.owner}</td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -535,32 +644,36 @@ export default function MilestoneTimeline() {
           <section className="ml-card">
             <h2>Milestone Summary</h2>
 
-            {[
-              ["Milestone ID", "MLS-004"],
-              ["Title", "Module Development"],
-              ["Type", "Phase"],
-              ["Status", <Pill status="In Progress" />],
-              ["Start Date", "01 Jun 2025"],
-              ["End Date", "30 Jul 2025"],
-              ["Baseline Duration", "60 Days"],
-              ["Actual Progress", "40%"],
-              ["Priority", "🔴 High"],
-              ["Owner", "Vikram Singh"],
-              ["Dependencies", "MLS-003"],
-              ["Blocking", "—"],
-            ].map(([a, b]) => (
-              <div className="ml-info" key={String(a)}>
-                <span>{a}</span>
-                <b>{b}</b>
-              </div>
-            ))}
+            {selectedItem ? (
+              [
+                ["Milestone ID", selectedItem.id],
+                ["Title", selectedItem.title],
+                ["Project", `${selectedItem.projectCode} - ${selectedItem.projectName}`],
+                ["Scope / Module", selectedItem.module],
+                ["Status", <Pill status={selectedItem.status} key="status" />],
+                ["Start Date", formatFullDate(selectedItem.start)],
+                ["End Date", formatFullDate(selectedItem.end)],
+                ["Baseline Duration", `${selectedItem.days} Days`],
+                ["Actual Progress", `${selectedItem.progress}%`],
+                ["Milestone Lead", selectedItem.owner],
+              ].map(([a, b]) => (
+                <div className="ml-info" key={String(a)}>
+                  <span>{a}</span>
+                  <b>{b}</b>
+                </div>
+              ))
+            ) : (
+              <p style={{ margin: "16px 0", fontSize: "13px", color: "#64748b" }}>
+                Select a milestone from the timeline to view details.
+              </p>
+            )}
           </section>
 
           <section className="ml-card">
-            <h2>Critical Path</h2>
-            <p className="ml-muted">Milestones on the critical path</p>
+            <h2>Critical Path Milestones</h2>
+            <p className="ml-muted">Sequential project delivery sequence</p>
 
-            {data.slice(0, 6).map((m, i) => (
+            {items.slice(0, 5).map((m, i) => (
               <div className="ml-critical" key={m.id}>
                 <b>{i + 1}</b>
 
@@ -577,44 +690,22 @@ export default function MilestoneTimeline() {
             ))}
 
             <footer>
-              Total Critical Path Duration: <b>122 Days</b>
+              Total Critical Path Milestones: <b>{items.length}</b>
             </footer>
           </section>
 
           <section className="ml-card">
             <div className="ml-card-head">
-              <h2>Activity Feed</h2>
-              <button className="ml-link-button">View All</button>
+              <h2>Milestone Audit Feed</h2>
             </div>
 
-            {[
-              [
-                "16 May 2025, 10:15 AM",
-                "Milestone status changed from Upcoming to In Progress",
-                "Mayank Swaroop",
-              ],
-              [
-                "15 May 2025, 04:45 PM",
-                "Design deliverables linked to this milestone",
-                "Neha Patel",
-              ],
-              [
-                "14 May 2025, 11:20 AM",
-                "Planned dates updated for Module Development",
-                "Vikram Singh",
-              ],
-              [
-                "10 May 2025, 09:30 AM",
-                "Milestone created",
-                "Mayank Swaroop",
-              ],
-            ].map(([d, t, u]) => (
-              <div className="ml-feed" key={d}>
+            {items.slice(0, 4).map((m, idx) => (
+              <div className="ml-feed" key={m.id || idx}>
                 <i />
                 <div>
-                  <b>{d}</b>
-                  <p>{t}</p>
-                  <small>by {u}</small>
+                  <b>{formatFullDate(m.start)}</b>
+                  <p>Milestone {m.id} ({m.title}) active at {m.progress}% completion</p>
+                  <small>Owner: {m.owner}</small>
                 </div>
               </div>
             ))}
@@ -625,53 +716,8 @@ export default function MilestoneTimeline() {
   );
 }
 
-function Dependency({ large = false }: { large?: boolean }) {
-  const nodes = [
-    ["MLS-001", "Project Kickoff", "01 May – 05 May", "completed", 2, 17],
-    [
-      "MLS-002",
-      "Requirements Sign-off",
-      "06 May – 15 May",
-      "completed",
-      20,
-      17,
-    ],
-    [
-      "MLS-003",
-      "Design Completion",
-      "16 May – 30 May",
-      "progress",
-      39,
-      17,
-    ],
-    [
-      "MLS-004",
-      "Module Development",
-      "01 Jun – 30 Jul",
-      "progress",
-      58,
-      17,
-    ],
-    ["MLS-005", "Internal QA", "01 Aug – 20 Aug", "upcoming", 78, 4],
-    ["MLS-006", "UAT Completion", "21 Aug – 05 Sep", "upcoming", 78, 42],
-    [
-      "MLS-007",
-      "Production Release",
-      "06 Sep – 10 Sep",
-      "upcoming",
-      78,
-      77,
-    ],
-    ["MLS-009", "Discovery Phase", "20 Apr – 05 May", "overdue", 2, 70],
-    [
-      "MLS-010",
-      "Prototype Approval",
-      "06 May – 20 May",
-      "completed",
-      20,
-      70,
-    ],
-  ] as const;
+function Dependency({ items, large = false }: { items: TimelineItem[]; large?: boolean }) {
+  const displayItems = items.slice(0, 8);
 
   return (
     <section className="ml-card ml-dependency">
@@ -699,75 +745,91 @@ function Dependency({ large = false }: { large?: boolean }) {
             strokeWidth="2"
             markerEnd="url(#ml-arrow)"
           />
-
-          <path
-            d="M140 105V315H205"
-            fill="none"
-            stroke="#f04444"
-            strokeDasharray="6 5"
-            strokeWidth="2"
-            markerEnd="url(#ml-arrow)"
-          />
         </svg>
 
-        {nodes.map((n) => (
-          <div
-            key={n[0]}
-            className={`ml-node ${n[3]}`}
-            style={{
-              left: n[4] + "%",
-              top: n[5] + "%",
-            }}
-          >
-            <b>{n[0]}</b>
-            <strong>{n[1]}</strong>
-            <span>{n[2]}</span>
-            <em>
-              {n[3] === "progress"
-                ? "In Progress"
-                : n[3][0].toUpperCase() + n[3].slice(1)}
-            </em>
+        {displayItems.length > 0 ? (
+          displayItems.map((n, idx) => {
+            const leftPct = (idx % 4) * 24 + 2;
+            const topPct = Math.floor(idx / 4) * 45 + 15;
+            const stateClass =
+              n.status === "Completed"
+                ? "completed"
+                : n.status === "In Progress"
+                ? "progress"
+                : n.status === "Overdue" || n.status === "At Risk"
+                ? "overdue"
+                : "upcoming";
+
+            return (
+              <div
+                key={n.id}
+                className={`ml-node ${stateClass}`}
+                style={{
+                  left: `${leftPct}%`,
+                  top: `${topPct}%`,
+                }}
+              >
+                <b>{n.id}</b>
+                <strong>{n.title}</strong>
+                <span>{short(n.start)} – {short(n.end)}</span>
+                <em>{n.status}</em>
+              </div>
+            );
+          })
+        ) : (
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#64748b" }}>
+            No milestones to render in dependency graph.
           </div>
-        ))}
+        )}
       </div>
 
       <div className="ml-legend">
-        <span>━━ Finish to Start (FS)</span>
-        <span>┄┄ Start to Start (SS)</span>
-        <span>┄┄ Finish to Finish (FF)</span>
-        <span>┄┄ Start to Finish (SF)</span>
+        <span>━━ Sequential Execution Flow</span>
+        <span className="dot green" /> Completed
+        <span className="dot orange" /> In Progress
+        <span className="dot blue" /> Upcoming
+        <span className="dot red" /> Overdue
       </div>
     </section>
   );
 }
 
-function FloatTable({ data = [] }: { data?: Milestone[] }) {
+function FloatTable({ items }: { items: TimelineItem[] }) {
+  const today = new Date().toISOString().slice(0, 10);
+
   return (
     <section className="ml-card">
-      <h2>Slack / Float &amp; Delay</h2>
+      <h2>Schedule Float &amp; Delay</h2>
 
       <table className="ml-mini">
         <thead>
           <tr>
             <th>Milestone</th>
-            <th>Total Float</th>
-            <th>Free Float</th>
+            <th>Lead</th>
             <th>Delay</th>
+            <th>Status</th>
           </tr>
         </thead>
 
         <tbody>
-          {data.length === 0 ? (
-            <tr><td colSpan={4} style={{ textAlign: "center", padding: "12px", color: "#6b7280" }}>No milestones</td></tr>
+          {items.length > 0 ? (
+            items.slice(0, 6).map((m) => {
+              const isOverdue = m.end < today && m.progress < 100;
+              return (
+                <tr key={m.id}>
+                  <td><strong>{m.id}</strong></td>
+                  <td>{m.owner}</td>
+                  <td>{isOverdue ? "Slippage detected" : "On Schedule"}</td>
+                  <td><Pill status={m.status} /></td>
+                </tr>
+              );
+            })
           ) : (
-            data.map((m) => (
-              <tr key={m.id}>
-                <td>{m.id}</td>
-                <td>0d</td>
-                <td>0d</td>
-                <td>-</td>
-              </tr>
-            ))
+            <tr>
+              <td colSpan={4} style={{ textAlign: "center", color: "#64748b", padding: "12px" }}>
+                No active milestones.
+              </td>
+            </tr>
           )}
         </tbody>
       </table>
@@ -775,21 +837,30 @@ function FloatTable({ data = [] }: { data?: Milestone[] }) {
   );
 }
 
-function Baseline() {
+function Baseline({ item }: { item: TimelineItem | null }) {
+  if (!item) {
+    return (
+      <section className="ml-card">
+        <h2>Baseline vs Actual</h2>
+        <p style={{ fontSize: "13px", color: "#64748b" }}>No milestone selected.</p>
+      </section>
+    );
+  }
+
   return (
     <section className="ml-card">
       <h2>Baseline vs Actual</h2>
 
       <div className="ml-baseline-legend">
-        <span>■ Baseline</span>
-        <span>■ Actual</span>
+        <span>■ Planned Baseline</span>
+        <span>■ Progress Actual</span>
       </div>
 
       {[
-        ["Start Date", "01 Jun 2025", "01 Jun 2025"],
-        ["End Date", "30 Jul 2025", "30 Jul 2025"],
-        ["Duration", "60 Days", "60 Days"],
-        ["Progress", "40%", "40%"],
+        ["Start Date", formatFullDate(item.start), formatFullDate(item.start)],
+        ["End Date", formatFullDate(item.end), formatFullDate(item.end)],
+        ["Duration", `${item.days} Days`, `${item.days} Days`],
+        ["Progress", `${item.progress}%`, `${item.progress}%`],
       ].map((r) => (
         <div className="ml-baseline-row" key={r[0]}>
           <span>{r[0]}</span>

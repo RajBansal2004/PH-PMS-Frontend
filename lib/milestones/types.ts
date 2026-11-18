@@ -23,21 +23,33 @@ export type MilestoneType =
 
 export interface Milestone {
   id: string;
+  _id?: string;
+  milestoneCode?: string;
   title: string;
+  name?: string;
   projectId: string;
+  projectCode?: string;
   projectName: string;
+  clientName?: string;
   type: MilestoneType;
   plannedStart: string;
   plannedEnd: string;
+  actualEnd?: string;
   status: MilestoneStatus;
   progress: number;
   priority: MilestonePriority;
+  weight?: number;
+  budget?: number;
   owner: {
     id: string;
     name: string;
     initials: string;
   };
   description?: string;
+  businessObjective?: string;
+  acceptanceCriteria?: string;
+  businessRules?: string;
+  dependencies?: string;
 }
 
 export interface MilestoneActivity {

@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -25,11 +25,14 @@ import {
   Search,
   Upload,
 } from "lucide-react";
+
 import { milestones as getMilestonesApi } from "../../lib/api";
+import { milestoneApi } from "../../lib/milestones/api";
 import type {
   Milestone,
   MilestonePriority,
   MilestoneStatus,
+  MilestoneType,
 } from "../../lib/milestones/types";
 
 import "./milestones.css";
@@ -124,52 +127,26 @@ export default function MilestoneRegistry() {
   const [pageSize, setPageSize] = useState(10);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadMilestones() {
-      try {
-        setLoading(true);
-        const res = await getMilestonesApi();
-        if (Array.isArray(res)) {
-          const mapped: Milestone[] = res.map((m: any) => ({
-            id: m.milestoneCode || m.code || m._id || m.id,
-            title: m.name || "Milestone",
-            projectId: m.projectId?._id || m.projectId || "PRJ",
-            projectName: m.projectId?.projectName || "Project",
-            type: m.billingType || "Delivery",
-            status: (m.status === "COMPLETED" ? "Completed" : m.status === "IN_PROGRESS" ? "In Progress" : m.status === "AT_RISK" ? "At Risk" : "Upcoming") as MilestoneStatus,
-            plannedStart: m.startDate ? m.startDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
-            plannedEnd: m.dueDate ? m.dueDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
-            actualEnd: m.completedAt ? m.completedAt.slice(0, 10) : undefined,
-            progress: m.progress || 0,
-            tasksTotal: m.taskCount || 0,
-            tasksCompleted: m.completedTaskCount || 0,
-            deliverablesTotal: 0,
-            deliverablesCompleted: 0,
-            billingPercentage: m.weight || 0,
-            owner: {
-              id: m.ownerId || "owner",
-              name: m.ownerName || "Unassigned",
-              initials: (m.ownerName || "UN").slice(0, 2).toUpperCase(),
-            },
-            priority: (m.priority || "Medium") as MilestonePriority,
-          }));
-          setMilestones(mapped);
-        } else {
-          setMilestones([]);
-        }
-      } catch (err) {
-        console.warn("Failed to load milestones:", err);
-        setMilestones([]);
-      } finally {
-        setLoading(false);
-      }
+  const loadMilestones = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await milestoneApi.list();
+      setMilestones(res?.items || []);
+    } catch (err) {
+      console.warn("Failed to load milestones:", err);
+      setMilestones([]);
+    } finally {
+      setLoading(false);
     }
-    loadMilestones();
   }, []);
+
+  useEffect(() => {
+    loadMilestones();
+  }, [loadMilestones]);
 
   const projects = useMemo(
     () => Array.from(new Map(
@@ -228,6 +205,19 @@ export default function MilestoneRegistry() {
 
   const totalPages = Math.max(1, Math.ceil(filteredMilestones.length / pageSize));
   const currentPage = Math.min(page, totalPages);
+
+  const dynamicActivities = useMemo(() => {
+    return milestones.slice(0, 5).map((m, idx) => ({
+      id: `ACT-${idx + 1}`,
+      milestoneId: m.milestoneCode || m.id,
+      milestoneTitle: m.title,
+      projectId: m.projectCode || m.projectName || "Project",
+      change: `Status: ${m.status} (${m.progress}%)`,
+      changedBy: m.owner.name,
+      changedAt: m.plannedStart || "Recent",
+      comment: m.businessObjective ? m.businessObjective.slice(0, 45) + "..." : "Milestone recorded in registry",
+    }));
+  }, [milestones]);
 
   const paginatedMilestones = filteredMilestones.slice(
     (currentPage - 1) * pageSize,
@@ -460,15 +450,27 @@ export default function MilestoneRegistry() {
                 </thead>
                 <tbody>
                   {paginatedMilestones.map((item) => (
-                    <tr key={item.id}>
+                    <tr key={item._id || item.id}>
                       <td>
-                        <Link className="ml-id-link" href={`/milestones/${item.id}`}>
-                          {item.id}
+                        <Link className="ml-id-link" href={`/milestones/${encodeURIComponent(item._id || item.id)}`}>
+                          {item.milestoneCode || item.id}
                         </Link>
                       </td>
-                      <td className="ml-title-cell">{item.title}</td>
+                      <td className="ml-title-cell">
+                        <Link href={`/milestones/${encodeURIComponent(item._id || item.id)}`} style={{ textDecoration: "none", color: "inherit", fontWeight: 600 }}>
+                          {item.title}
+                        </Link>
+                        {item.clientName && (
+                          <div style={{ fontSize: "11px", color: "#64748b" }}>Client: {item.clientName}</div>
+                        )}
+                      </td>
                       <td>
-                        <span className="ml-project-code">{item.projectId}</span>
+                        <span className="ml-project-code" title={item.projectName}>
+                          {item.projectCode || item.projectId}
+                        </span>
+                        <div style={{ fontSize: "11px", color: "#64748b", maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {item.projectName}
+                        </div>
                       </td>
                       <td>{item.type}</td>
                       <td>{formatDate(item.plannedStart)}</td>
@@ -484,12 +486,12 @@ export default function MilestoneRegistry() {
                       </td>
                       <td>
                         <div className="ml-row-actions">
-                          <Link href={`/milestones/${item.id}`} aria-label={`View ${item.id}`} title="View milestone">
+                          <Link href={`/milestones/${encodeURIComponent(item._id || item.id)}`} aria-label={`View ${item.title}`} title="View milestone">
                             <Eye size={15} />
                           </Link>
-                          <button type="button" aria-label={`More actions for ${item.id}`} title="More actions" onClick={() => window.alert(`Actions for ${item.id} will be connected with the backend.`)}>
-                            <MoreVertical size={15} />
-                          </button>
+                          <Link href={`/milestones/${encodeURIComponent(item._id || item.id)}/edit`} aria-label={`Edit ${item.title}`} title="Edit milestone">
+                            <FilePlus2 size={15} />
+                          </Link>
                         </div>
                       </td>
                     </tr>
@@ -545,20 +547,26 @@ export default function MilestoneRegistry() {
             <section className="ml-panel ml-chart-panel">
               <h2>Milestones by Project</h2>
               <div className="ml-project-breakdown">
-                {projects.map(([id, name]) => {
-                  const projectCount = milestones.filter((item) => item.projectId === id).length;
-                  const percent = total ? (projectCount / total) * 100 : 0;
+                {projects.length > 0 ? (
+                  projects.map(([id, name]) => {
+                    const projectCount = milestones.filter((item) => item.projectId === id).length;
+                    const percent = total ? (projectCount / total) * 100 : 0;
 
-                  return (
-                    <div className="ml-breakdown-row" key={id}>
-                      <span>{id} - {name}</span>
-                      <div className="ml-mini-track">
-                        <span style={{ width: `${percent}%` }} />
+                    return (
+                      <div className="ml-breakdown-row" key={id}>
+                        <span>{id} - {name}</span>
+                        <div className="ml-mini-track">
+                          <span style={{ width: `${percent}%` }} />
+                        </div>
+                        <strong>{projectCount}</strong>
                       </div>
-                      <strong>{projectCount}</strong>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                ) : (
+                  <p style={{ margin: "16px 0", fontSize: "13px", color: "#64748b" }}>
+                    No milestones linked to projects yet.
+                  </p>
+                )}
               </div>
             </section>
 
@@ -614,20 +622,24 @@ export default function MilestoneRegistry() {
                   </tr>
                 </thead>
                 <tbody>
-                  {milestones.length === 0 ? (
-                    <tr><td colSpan={7} className="ml-empty" style={{ textAlign: "center", padding: "1.5rem" }}>No milestone activity recorded yet.</td></tr>
-                  ) : (
-                    milestones.slice(0, 5).map((m) => (
-                      <tr key={m.id}>
-                        <td><Link className="ml-id-link" href={`/milestones/${m.id}`}>{m.id}</Link></td>
-                        <td>{m.title}</td>
-                        <td>{m.projectName}</td>
-                        <td className="ml-activity-change">{m.status}</td>
-                        <td>{m.owner.name}</td>
-                        <td>{m.plannedStart}</td>
-                        <td>—</td>
+                  {dynamicActivities.length > 0 ? (
+                    dynamicActivities.map((activity) => (
+                      <tr key={activity.id}>
+                        <td><Link className="ml-id-link" href={`/milestones/${activity.milestoneId}`}>{activity.milestoneId}</Link></td>
+                        <td>{activity.milestoneTitle}</td>
+                        <td>{activity.projectId}</td>
+                        <td className="ml-activity-change">{activity.change}</td>
+                        <td>{activity.changedBy}</td>
+                        <td>{activity.changedAt}</td>
+                        <td>{activity.comment || "—"}</td>
                       </tr>
                     ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
+                        No milestone activity recorded yet. Create a milestone to see timeline updates.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -689,16 +701,22 @@ export default function MilestoneRegistry() {
               <h2>Upcoming Milestones</h2>
               <Link href="/milestones/calendar">View All</Link>
             </div>
-            {milestones.filter((item) => item.status === "Upcoming").slice(0, 5).map((item) => (
-              <Link href={`/milestones/${item.id}`} className="ml-upcoming-row" key={item.id}>
-                <CalendarDays size={15} />
-                <span>
-                  <strong>{item.id}</strong>
-                  <small>{item.title}</small>
-                </span>
-                <time>{formatDate(item.plannedStart)}</time>
-              </Link>
-            ))}
+            {milestones.filter((item) => item.status === "Upcoming").length > 0 ? (
+              milestones.filter((item) => item.status === "Upcoming").slice(0, 5).map((item) => (
+                <Link href={`/milestones/${encodeURIComponent(item._id || item.id)}`} className="ml-upcoming-row" key={item.id}>
+                  <CalendarDays size={15} />
+                  <span>
+                    <strong>{item.milestoneCode || item.id}</strong>
+                    <small>{item.title}</small>
+                  </span>
+                  <time>{formatDate(item.plannedStart)}</time>
+                </Link>
+              ))
+            ) : (
+              <p style={{ margin: "16px 0", fontSize: "13px", color: "#64748b" }}>
+                No upcoming milestones scheduled.
+              </p>
+            )}
           </section>
 
           <section className="ml-panel ml-quick-actions">

@@ -3,16 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  Activity, AlertCircle, ArrowDownToLine, ArrowRight, Check,
+  AlertCircle,
   CheckCircle2, ChevronDown, Circle, ClipboardCheck, Clock3,
-  Download, FileText, Flag, Heart, Lightbulb, MessageSquare,
-  MoreHorizontal, Paperclip, PlayCircle, Plus, Share2, ShieldCheck,
-  Star, Target, ThumbsDown, ThumbsUp, X, BarChart3, CalendarDays,
+  Download, FileText, Heart,
+  Share2, Target, X,
 } from "lucide-react";
+import { sprintApi, isValidObjectId, type Sprint } from "@/lib/sprints/api";
 import {
-  sprints as getSprints,
-  updateSprint as apiUpdateSprint,
   tasks as getTasks,
   getBugs,
 } from "@/lib/api";
@@ -48,11 +47,12 @@ function Donut({
   color?: string;
   children?: React.ReactNode;
 }) {
+  const safeVal = Math.max(0, Math.min(100, value));
   return (
     <div
       className="sr-donut"
       style={{
-        background: `conic-gradient(${color} 0 ${value}%, #e8edf5 ${value}% 100%)`,
+        background: `conic-gradient(${color} 0 ${safeVal}%, #e8edf5 ${safeVal}% 100%)`,
       }}
     >
       <div className="sr-donut-center">
@@ -130,9 +130,11 @@ function Table({
   );
 }
 
-export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: string }) {
+export default function SprintReview({ sprintId }: { sprintId: string }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
-  const [sprint, setSprint] = useState<any>(null);
+  const [sprint, setSprint] = useState<Sprint | null>(null);
+  const [allSprints, setAllSprints] = useState<Sprint[]>([]);
   const [tasksList, setTasksList] = useState<Item[]>([]);
   const [issuesList, setIssuesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,74 +145,86 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
   const [toast, setToast] = useState("");
   const [nextSteps, setNextSteps] = useState([true, false, false, false]);
 
-  const sprintCode = sprint?.sprintCode || sprint?.code || sprintId.toUpperCase();
-
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3000);
   };
 
   useEffect(() => {
+    let active = true;
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [sRes, tRes, bRes] = await Promise.allSettled([
-          getSprints(),
-          getTasks(),
-          getBugs().catch(() => ({ data: [] })),
-        ]);
+        const { sprint: targetSprint, allSprints: sprintOptions } = await sprintApi.resolve(
+          sprintId,
+          ["ACTIVE", "COMPLETED", "PLANNED"]
+        );
 
-        let targetSprint: any = null;
-        if (sRes.status === "fulfilled") {
-          const raw = Array.isArray(sRes.value) ? sRes.value : sRes.value?.data || sRes.value?.items || [];
-          targetSprint = raw.find(
-            (s: any) =>
-              s._id === sprintId ||
-              s.id === sprintId ||
-              (s.sprintCode && s.sprintCode.toLowerCase() === sprintId.toLowerCase()) ||
-              (s.code && s.code.toLowerCase() === sprintId.toLowerCase())
-          ) || raw[0] || null;
+        if (!active) return;
+        setAllSprints(sprintOptions);
+        setSprint(targetSprint);
 
-          if (targetSprint) {
-            setSprint(targetSprint);
-            setApproved(targetSprint.status === "COMPLETED" || targetSprint.status === "Completed");
-          }
+        if (!targetSprint) {
+          setTasksList([]);
+          setIssuesList([]);
+          return;
         }
 
-        if (tRes.status === "fulfilled") {
-          const rawTasks = Array.isArray(tRes.value) ? tRes.value : tRes.value?.data || tRes.value?.items || [];
-          const sprintKey = targetSprint?._id || sprintId;
-          const filtered = rawTasks.filter((t: any) => {
-            if (!targetSprint) return true;
-            return t.sprintId === sprintKey || t.sprintId?._id === sprintKey || t.sprint === sprintKey;
-          });
+        const isDone =
+          targetSprint.rawStatus === "COMPLETED" ||
+          targetSprint.status === "Completed" ||
+          Boolean(targetSprint.review?.approvedAt);
+        setApproved(isDone);
+        setComment(targetSprint.review?.comment || "");
 
-          const mapped: Item[] = (filtered.length > 0 ? filtered : rawTasks.slice(0, 15)).map((t: any) => ({
+        const projectKey =
+          typeof targetSprint.projectId === "object"
+            ? targetSprint.projectId?._id
+            : targetSprint.projectId;
+
+        const [tRes, bRes] = await Promise.allSettled([
+          getTasks({ sprintId: targetSprint._id, limit: 100 }),
+          getBugs(projectKey && isValidObjectId(projectKey) ? { projectId: projectKey, limit: 100 } : { limit: 100 }).catch(() => ({ items: [] })),
+        ]);
+
+        if (!active) return;
+
+        if (tRes.status === "fulfilled") {
+          const rawTasks = Array.isArray(tRes.value) ? tRes.value : (tRes.value as any)?.data || (tRes.value as any)?.items || [];
+          const mapped: Item[] = rawTasks.map((t: any) => ({
             id: t.taskId || t.code || `TSK-${String(t._id || t.id).slice(-4).toUpperCase()}`,
             title: t.title || "Task",
-            type: t.type || "Feature",
-            points: Number(t.estimatedHours ? Math.round(t.estimatedHours / 4) : t.storyPoints || 3),
+            type: t.type || "Task",
+            points: Number(t.storyPoints || (t.estimatedHours ? Math.max(1, Math.round(t.estimatedHours / 4)) : 3)),
             assignee: t.assigneeId?.name || t.assignee?.name || t.assigneeName || "Unassigned",
-            status: t.status || "Open",
-            progress: t.status === "Completed" || t.status === "Done" || t.status === "COMPLETED" ? 100 : t.progress || 0,
+            status: t.status || "TO_DO",
+            progress:
+              ["completed", "done"].includes(String(t.status || "").toLowerCase())
+                ? 100
+                : t.progress || 0,
           }));
           setTasksList(mapped);
         }
 
         if (bRes.status === "fulfilled") {
           const rawBugs: any = bRes.value;
-          const rawBugsList = Array.isArray(rawBugs) ? rawBugs : rawBugs?.data || rawBugs?.items || [];
+          const rawBugsList = Array.isArray(rawBugs) ? rawBugs : rawBugs?.items || rawBugs?.data || [];
           setIssuesList(rawBugsList);
         }
       } catch (err: any) {
         notify(`Failed to fetch sprint review data: ${err?.message || "Server error"}`);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     fetchData();
+    return () => {
+      active = false;
+    };
   }, [sprintId]);
+
+  const sprintCode = sprint?.sprintCode || sprintId.toUpperCase();
 
   const completedItems = useMemo(
     () => tasksList.filter((item) => ["completed", "done"].includes((item.status || "").toLowerCase())),
@@ -218,21 +232,41 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
   );
 
   const inProgressItems = useMemo(
-    () => tasksList.filter((item) => ["in progress", "progress", "testing", "in review", "review"].includes((item.status || "").toLowerCase())),
+    () =>
+      tasksList.filter((item) =>
+        ["in progress", "in_progress", "progress", "testing", "in review", "in_review", "code_review", "review", "qa", "uat"].includes(
+          (item.status || "").toLowerCase()
+        )
+      ),
     [tasksList]
   );
 
   const notCompletedItems = useMemo(
-    () => tasksList.filter((item) => ["open", "todo", "draft"].includes((item.status || "").toLowerCase())),
+    () =>
+      tasksList.filter((item) => {
+        const st = (item.status || "").toLowerCase();
+        return (
+          !["completed", "done"].includes(st) &&
+          !["in progress", "in_progress", "progress", "testing", "in review", "in_review", "code_review", "review", "qa", "uat"].includes(st)
+        );
+      }),
     [tasksList]
   );
 
-  const totalPoints = useMemo(() => tasksList.reduce((sum, item) => sum + item.points, 0), [tasksList]);
-  const completedPoints = useMemo(() => completedItems.reduce((sum, item) => sum + item.points, 0), [completedItems]);
-  const inProgressPoints = useMemo(() => inProgressItems.reduce((sum, item) => sum + item.points, 0), [inProgressItems]);
-  const notCompletedPoints = useMemo(() => notCompletedItems.reduce((sum, item) => sum + item.points, 0), [notCompletedItems]);
+  const totalPoints = useMemo(() => {
+    const sum = tasksList.reduce((acc, item) => acc + item.points, 0);
+    return sum > 0 ? sum : sprint?.plannedStoryPoints || 0;
+  }, [tasksList, sprint]);
 
-  const completionPercent = totalPoints > 0 ? Math.round((completedPoints / totalPoints) * 100) : 0;
+  const completedPoints = useMemo(() => {
+    const sum = completedItems.reduce((acc, item) => acc + item.points, 0);
+    return sum > 0 ? sum : sprint?.completedStoryPoints || 0;
+  }, [completedItems, sprint]);
+
+  const inProgressPoints = useMemo(() => inProgressItems.reduce((sum, item) => sum + item.points, 0), [inProgressItems]);
+  const notCompletedPoints = Math.max(0, totalPoints - completedPoints - inProgressPoints);
+
+  const completionPercent = totalPoints > 0 ? Math.round((completedPoints / totalPoints) * 100) : sprint?.progress || 0;
 
   const progressRows = useMemo(
     () => completedItems.map((item) => [
@@ -280,7 +314,17 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
   const handleApproveSprint = async () => {
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, { status: "COMPLETED" });
+        await sprintApi.update(sprint._id, {
+          status: "COMPLETED",
+          progress: 100,
+          completedStoryPoints: completedPoints,
+          review: {
+            approved: true,
+            approvedAt: new Date().toISOString(),
+            approvedBy: sprint.ownerName || "Sprint Lead",
+            comment: comment.trim(),
+          },
+        });
       }
       setApproved(true);
       setShowModal(false);
@@ -293,7 +337,13 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
   const handleReopenSprint = async () => {
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, { status: "ACTIVE" });
+        await sprintApi.update(sprint._id, {
+          status: "ACTIVE",
+          review: {
+            approved: false,
+            reopenedAt: new Date().toISOString(),
+          },
+        });
       }
       setApproved(false);
       notify("Sprint re-opened.");
@@ -303,10 +353,9 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
   };
 
   const sprintName = sprint?.name || `Sprint ${sprintCode}`;
-  const milestoneName = sprint?.milestoneId?.name || "Sprint Milestone";
-  const startDateStr = sprint?.startDate ? new Date(sprint.startDate).toLocaleDateString("en-IN") : "Not set";
-  const endDateStr = sprint?.endDate ? new Date(sprint.endDate).toLocaleDateString("en-IN") : "Not set";
-  const sprintOwner = sprint?.ownerId?.name || sprint?.owner?.name || "Sprint Lead";
+  const milestoneName = sprint?.milestoneName || "Not Linked";
+  const projectLabel = sprint?.projectName ? `${sprint.projectCode || "PRJ"} - ${sprint.projectName}` : "Not Linked";
+  const sprintOwner = sprint?.ownerName || "Sprint Lead";
 
   return (
     <main className="sr-page">
@@ -319,6 +368,32 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
           <strong>Sprint Review ({sprintCode})</strong>
         </div>
         <div className="sr-toolbar-actions">
+          {allSprints.length > 0 && (
+            <select
+              aria-label="Switch Sprint"
+              value={sprint?._id || sprint?.id || ""}
+              onChange={(e) => {
+                if (e.target.value) router.push(`/sprints/review/${encodeURIComponent(e.target.value)}`);
+              }}
+              style={{
+                height: "30px",
+                padding: "0 10px",
+                border: "1px solid #d5dfef",
+                borderRadius: "5px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#10204a",
+                background: "#ffffff",
+                cursor: "pointer",
+              }}
+            >
+              {allSprints.map((s) => (
+                <option key={s._id || s.id} value={s._id || s.id}>
+                  {s.sprintCode} — {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={exportReport}><Download size={13} /> Download Report</button>
           <button onClick={() => notify("Review link copied to clipboard.")}><Share2 size={13} /> Share</button>
           <div className="sr-menu-wrap">
@@ -341,7 +416,11 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
             <Status>{approved ? "Completed" : "In Review"}</Status>
           </div>
           <strong className="sr-subtitle">{sprintName}</strong>
-          <p>Review the work completed in this sprint and verify deliverables.</p>
+          <p>
+            {loading
+              ? "Loading sprint review metrics..."
+              : `Review deliverables, task completions, and verify quality criteria for ${sprintName}.`}
+          </p>
         </div>
         <div className="sr-heading-buttons">
           <button className="sr-primary" onClick={() => setShowModal(true)}>
@@ -355,10 +434,10 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
 
       <section className="sr-info">
         {[
-          ["Project", sprint?.projectId?.name || sprint?.projectId?.projectName || "Linked Project"],
+          ["Project", projectLabel],
           ["Milestone", milestoneName],
           ["Sprint", `${sprintCode} - ${sprintName}`],
-          ["Duration", `${startDateStr} - ${endDateStr}`],
+          ["Duration", `${sprint?.start || "—"} - ${sprint?.end || "—"} (${sprint?.durationDays || 14} Days)`],
           ["Sprint Owner", sprintOwner],
           ["Status", approved ? "Completed" : "In Review"],
           ["Total Story Points", `${totalPoints} SP`],
@@ -386,8 +465,10 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
       {/* ROW 1: REVIEW SUMMARY */}
       <section className="sr-summary" id="sr-summary">
         <Card title="Sprint Goal" className="sr-goal-card">
-          <p>{sprint?.goal || "No sprint goal defined."}</p>
-          <strong className="sr-achieved"><CheckCircle2 size={13} /> {completionPercent >= 80 ? "Goal Achieved" : "In Progress"}</strong>
+          <p>{sprint?.goal || "No sprint goal defined for this sprint."}</p>
+          <strong className="sr-achieved">
+            <CheckCircle2 size={13} /> {completionPercent >= 80 ? "Goal Achieved" : `${completionPercent}% Progress`}
+          </strong>
           <Target className="sr-target-art" size={65} strokeWidth={1.2} />
         </Card>
 
@@ -431,7 +512,7 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
         <Card title={`Completed Items (${completedItems.length})`} className="sr-completed-card" id="sr-completed">
           {completedItems.length === 0 ? (
             <div style={{ padding: "30px", textAlign: "center", color: "#6b7280" }}>
-              No completed items recorded in this sprint yet.
+              No completed tasks linked to this sprint yet. Complete tasks on the Kanban board to reflect here.
             </div>
           ) : (
             <>
@@ -449,7 +530,7 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
         <div className="sr-middle-stack" id="sr-inprogress">
           <Card title={`In Progress Items (${inProgressItems.length})`}>
             {inProgressItems.length === 0 ? (
-              <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>No tasks in progress.</div>
+              <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>No tasks currently in progress.</div>
             ) : (
               <Table
                 headers={["ID", "Title", "Type", "Story Points", "Assignee", "% Complete"]}
@@ -465,7 +546,7 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
 
           <Card title={`Remaining Tasks (${notCompletedItems.length})`}>
             {notCompletedItems.length === 0 ? (
-              <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>All tasks have been started or completed.</div>
+              <div style={{ padding: "20px", textAlign: "center", color: "#6b7280" }}>All sprint tasks have been started or completed.</div>
             ) : (
               <Table
                 headers={["ID", "Title", "Type", "Story Points", "Assignee", "Status"]}
@@ -504,8 +585,39 @@ export default function SprintReview({ sprintId = "SPR-001" }: { sprintId?: stri
 
         <Card title="Retrospective Summary" className="sr-retro-card" id="sr-retrospective">
           <div className="sr-retro-lines">
-            <div><b>Sprint Achievements</b><ul><li>Completed {completedItems.length} tasks totaling {completedPoints} Story Points</li><li>Demonstrated core sprint deliverables</li></ul></div>
-            <div><b>Continuous Improvement</b><ul><li>Ensure team capacity accurately reflects available hours</li><li>Review dependencies during sprint planning</li></ul></div>
+            <div>
+              <b>Sprint Achievements</b>
+              <ul>
+                <li>Completed {completedItems.length} tasks totaling {completedPoints} Story Points</li>
+                {sprint && sprint.retrospective?.ideas?.good?.length > 0 ? (
+                  sprint.retrospective.ideas.good.slice(0, 3).map((item: any, idx: number) => (
+                    <li key={idx}>{item.title} ({item.owner})</li>
+                  ))
+                ) : (
+                  <li>Delivered sprint milestones and features according to definition of done</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <b>Continuous Improvement</b>
+              <ul>
+                {sprint && sprint.retrospective?.ideas?.improve?.length > 0 ? (
+                  sprint.retrospective.ideas.improve.slice(0, 3).map((item: any, idx: number) => (
+                    <li key={idx}>{item.title}</li>
+                  ))
+                ) : (
+                  <>
+                    <li>Track dependencies and capacity proactively in next sprint planning</li>
+                    <li>Refine testing coverage before final sprint demo</li>
+                  </>
+                )}
+              </ul>
+            </div>
+          </div>
+          <div style={{ marginTop: "12px", textAlign: "right" }}>
+            <Link href={`/sprints/retrospective/${sprint?._id || sprintCode}`} style={{ fontSize: "12px", color: "#0066cc", fontWeight: 600 }}>
+              Open Full Retrospective Board →
+            </Link>
           </div>
         </Card>
       </section>

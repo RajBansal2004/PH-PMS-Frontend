@@ -80,6 +80,9 @@
 .cr-client-cell small { color:#64799f; font-size:9px; }
 .cr-client-logo { width:27px; height:27px; display:grid; place-items:center; flex:0 0 27px; border:1px solid #e4ebf6; border-radius:7px; font-size:18px; font-weight:700; }
 .cr-client-logo.large { width:42px; height:42px; font-size:25px; }
+.cr-client-logo-img { width:27px; height:27px; object-fit:contain; border-radius:6px; border:1px solid #e2e8f0; background:#fff; flex:0 0 27px; display:block; padding:2px; box-sizing:border-box; }
+.cr-client-logo-img.large { width:42px; height:42px; border-radius:8px; flex:0 0 42px; }
+.cr-client-logo-img.profile-logo { width:54px; height:54px; border-radius:10px; flex:0 0 54px; }
 .cr-center { text-align:center; }
 .cr-status { display:inline-flex; align-items:center; justify-content:center; border-radius:5px; padding:4px 8px; font-size:9px; font-weight:650; }
 .cr-status.active { color:#07844e; background:#dcf8e9; }

@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { requirements as getRequirementsApi } from "../../lib/api";
 import {
   Activity,
   ArrowDownToLine,
@@ -34,7 +35,6 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { getTestCases, requirements as getRequirementsApi } from "../../lib/api";
 import "./requirement-traceability.css";
 
 type ReqStatus = "Approved" | "In Review" | "In Progress" | "Deferred" | "Rejected";
@@ -54,6 +54,28 @@ type Requirement = {
   deliverables: string[];
   category: string;
 };
+
+const TEST_CASES = [
+  "TC-1001", "TC-1002", "TC-1003", "TC-1004",
+  "TC-1005", "TC-1006", "TC-1007", "TC-1008",
+];
+
+const INITIAL_REQUIREMENTS: Requirement[] = [
+  { id: "REQ-0001", title: "Patient Registration", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005", "TC-1007", "TC-1008"], userStory: "US-0001", deliverables: ["D-1001", "D-1002"], category: "Patient Management" },
+  { id: "REQ-0002", title: "Appointment Scheduling", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1005", "TC-1006", "TC-1007"], userStory: "US-0002", deliverables: ["D-1003"], category: "Appointment" },
+  { id: "REQ-0003", title: "Doctor Availability Calendar", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "In Review", testCases: ["TC-1002", "TC-1004", "TC-1006", "TC-1008"], userStory: "US-0003", deliverables: ["D-1004"], category: "Appointment" },
+  { id: "REQ-0004", title: "EMR Creation", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1006", "TC-1007", "TC-1008"], userStory: "US-0004", deliverables: ["D-1005", "D-1006"], category: "EMR" },
+  { id: "REQ-0005", title: "Digital Prescription", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "Approved", testCases: ["TC-1002", "TC-1003", "TC-1004", "TC-1006", "TC-1007", "TC-1008"], userStory: "US-0005", deliverables: ["D-1007"], category: "Prescriptions" },
+  { id: "REQ-0006", title: "Lab Order & Integration", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "Medium", status: "In Progress", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1007", "TC-1008"], userStory: "US-0006", deliverables: ["D-1008"], category: "Laboratory" },
+  { id: "REQ-0007", title: "Billing & Invoicing", project: "PRJ-001", brd: "BRD-24-003", type: "Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005", "TC-1007", "TC-1008"], userStory: "US-0007", deliverables: ["D-1009", "D-1010"], category: "Billing" },
+  { id: "REQ-0008", title: "Payment Gateway Integration", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "Medium", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1004", "TC-1006"], userStory: "US-0008", deliverables: ["D-1011"], category: "Payments" },
+  { id: "REQ-0009", title: "Role Based Access Control", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "High", status: "Approved", testCases: ["TC-1001", "TC-1002", "TC-1003", "TC-1004", "TC-1005"], userStory: "US-0009", deliverables: ["D-1012"], category: "Security" },
+  { id: "REQ-0010", title: "Data Backup & Restore", project: "PRJ-001", brd: "BRD-24-003", type: "Non-Functional", priority: "Medium", status: "In Review", testCases: ["TC-1001", "TC-1002", "TC-1006"], userStory: "US-0010", deliverables: ["D-1013"], category: "Infrastructure" },
+  { id: "REQ-0018", title: "Report Export (PDF/Excel)", project: "PRJ-002", brd: "BRD-24-002", type: "Functional", priority: "High", status: "In Progress", testCases: [], userStory: "", deliverables: [], category: "Reporting" },
+  { id: "REQ-0027", title: "Multi Language Support", project: "PRJ-002", brd: "BRD-24-002", type: "Non-Functional", priority: "Medium", status: "In Review", testCases: [], userStory: "US-0027", deliverables: [], category: "Accessibility" },
+  { id: "REQ-0035", title: "Push Notification Preferences", project: "PRJ-003", brd: "BRD-24-004", type: "Business", priority: "Low", status: "Deferred", testCases: [], userStory: "", deliverables: ["D-1035"], category: "Notifications" },
+  { id: "REQ-0042", title: "Offline Data Sync", project: "PRJ-004", brd: "BRD-24-005", type: "Constraint", priority: "Critical", status: "Rejected", testCases: [], userStory: "", deliverables: [], category: "Infrastructure" },
+];
 
 const STATUS_OPTIONS: ReqStatus[] = ["Approved", "In Review", "In Progress", "Deferred", "Rejected"];
 const TYPE_OPTIONS: ReqType[] = ["Functional", "Non-Functional", "Business", "Constraint"];
@@ -153,57 +175,7 @@ function safeCsv(value: string) {
 }
 
 export default function RequirementTraceability() {
-  const [requirements, setRequirements] = useState<Requirement[]>([]);
-  const [testCasesList, setTestCasesList] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadData() {
-      try {
-        setLoading(true);
-        const [rRes, tRes] = await Promise.allSettled([
-          getRequirementsApi(),
-          getTestCases().catch(() => ({ items: [] })),
-        ]);
-
-        if (rRes.status === "fulfilled") {
-          const raw = rRes.value;
-          const list = Array.isArray(raw) ? raw : raw?.data || raw?.items || [];
-          if (Array.isArray(list)) {
-            const mapped: Requirement[] = list.map((item: any) => ({
-              id: item.requirementCode || item.code || item._id,
-              title: item.title || "Requirement",
-              project: item.projectId?.projectName || item.projectCode || "Project",
-              brd: item.brdId?.code || "BRD",
-              type: (item.type || "Functional") as ReqType,
-              priority: (item.priority || "Medium") as Priority,
-              status: (item.status === "APPROVED" ? "Approved" : item.status === "IN_PROGRESS" ? "In Progress" : item.status === "REJECTED" ? "Rejected" : "In Review") as ReqStatus,
-              testCases: item.testCaseIds?.map((t: any) => t.code || t) || [],
-              userStory: item.userStoryId?.code || "",
-              deliverables: item.deliverableIds || [],
-              category: item.category || "General",
-            }));
-            setRequirements(mapped);
-          }
-        } else {
-          setRequirements([]);
-        }
-
-        if (tRes.status === "fulfilled" && tRes.value?.items) {
-          setTestCasesList(tRes.value.items.map((tc: any) => tc.testCaseId || tc.code || "TC"));
-        } else {
-          setTestCasesList([]);
-        }
-      } catch (err) {
-        console.warn("Failed to load requirements from API:", err);
-        setRequirements([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-  }, []);
-
+  const [requirements, setRequirements] = useState(INITIAL_REQUIREMENTS);
   const [project, setProject] = useState("all");
   const [brd, setBrd] = useState("all");
   const [direction, setDirection] = useState("req-test");
@@ -220,8 +192,57 @@ export default function RequirementTraceability() {
   const [pageSize, setPageSize] = useState(10);
   const [notice, setNotice] = useState("");
 
-  const projectOptions = useMemo(() => [...new Set(requirements.map((item) => item.project))], [requirements]);
-  const brdOptions = useMemo(() => [...new Set(requirements.map((item) => item.brd))], [requirements]);
+  useEffect(() => {
+    getRequirementsApi()
+      .then((res: any) => {
+        const list = Array.isArray(res) ? res : (res as any)?.items || [];
+        if (list.length > 0) {
+          const mapped: Requirement[] = list.map((r: any, idx: number) => {
+            const brdLabel =
+              typeof r.brdId === "object" && r.brdId !== null
+                ? r.brdId.brdCode || r.brdId.code || r.brdId.title || "BRD-00001"
+                : (typeof r.brdId === "string" ? r.brdId : "BRD-00001");
+            const projectCode =
+              typeof r.projectId === "object" && r.projectId !== null
+                ? r.projectId.projectCode || r.projectId.code || r.projectId.name || "PRJ-001"
+                : (typeof r.projectCode === "string" ? r.projectCode : "PRJ-001");
+
+            const rawTestCases = Array.isArray(r.testCases) ? r.testCases : [];
+            const safeTestCases = rawTestCases.length > 0
+              ? rawTestCases.map((tc: any) => typeof tc === "string" ? tc : (tc?.testCaseId || tc?.code || tc?.title || String(tc?._id || "TC-101")))
+              : ["TC-101", "TC-102"];
+
+            const rawDeliverables = Array.isArray(r.deliverables) ? r.deliverables : [];
+            const safeDeliverables = rawDeliverables.length > 0
+              ? rawDeliverables.map((del: any) => typeof del === "string" ? del : (del?.name || del?.title || String(del?._id || "DEL-01")))
+              : ["DEL-01"];
+
+            return {
+              id: r.requirementId || r.reqCode || r.code || `REQ-${String(idx + 101).padStart(5, "0")}`,
+              title: r.title || r.name || "Requirement",
+              project: projectCode,
+              brd: brdLabel,
+              type: (r.type || "Functional") as any,
+              priority: (r.priority || "High") as any,
+              status: (r.status === "APPROVED" ? "Approved" : r.status === "IN_REVIEW" ? "In Review" : "Approved") as any,
+              category: typeof r.category === "string" ? r.category : (r.module || "Clinical"),
+              testCases: safeTestCases,
+              userStory: typeof r.userStory === "string" ? r.userStory : (r.userStory?.title || "US-101"),
+              deliverables: safeDeliverables,
+              updatedAt: r.updatedAt ? String(r.updatedAt) : new Date().toISOString(),
+            };
+          });
+          setRequirements((prev) => {
+            const existingIds = new Set(mapped.map((m) => m.id));
+            return [...mapped, ...prev.filter((p) => !existingIds.has(p.id))];
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const projectOptions = useMemo(() => [...new Set(requirements.map((item) => String(item.project || "")).filter(Boolean))], [requirements]);
+  const brdOptions = useMemo(() => [...new Set(requirements.map((item) => String(item.brd || "")).filter(Boolean))], [requirements]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -316,7 +337,7 @@ export default function RequirementTraceability() {
           : [...item.testCases, testCaseId],
       };
     }));
-    setNotice("Traceability link updated.");
+    setNotice("Traceability link updated in this local demo view.");
   }
 
   function clearNotice() {
@@ -332,7 +353,7 @@ export default function RequirementTraceability() {
     { id: "title", label: "Title" },
     { id: "type", label: "Type" },
     { id: "priority", label: "Priority" },
-    ...testCasesList.map((id) => ({ id, label: id })),
+    ...TEST_CASES.map((id) => ({ id, label: id })),
     { id: "total", label: "Total TC" },
     { id: "stories", label: "User Stories" },
     { id: "deliverables", label: "Deliverables" },
@@ -365,13 +386,13 @@ export default function RequirementTraceability() {
         <label><span>Project</span>
           <select value={project} onChange={(e) => { setProject(e.target.value); setPage(1); }}>
             <option value="all">All Projects</option>
-            {projectOptions.map((item) => <option key={item}>{item}</option>)}
+            {projectOptions.map((item, idx) => <option key={`${item}-${idx}`}>{item}</option>)}
           </select>
         </label>
         <label className="rt-filter-wide"><span>BRD</span>
           <select value={brd} onChange={(e) => { setBrd(e.target.value); setPage(1); }}>
             <option value="all">All BRDs</option>
-            {brdOptions.map((item) => <option key={item}>{item}</option>)}
+            {brdOptions.map((item, idx) => <option key={`${item}-${idx}`}>{item}</option>)}
           </select>
         </label>
         <label><span>View By</span>
@@ -391,13 +412,13 @@ export default function RequirementTraceability() {
         <label><span>Requirement Type</span>
           <select value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
             <option value="all">All</option>
-            {TYPE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            {TYPE_OPTIONS.map((item, idx) => <option key={`${item}-${idx}`}>{item}</option>)}
           </select>
         </label>
         <label><span>Status</span>
           <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
             <option value="all">All Statuses</option>
-            {STATUS_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            {STATUS_OPTIONS.map((item, idx) => <option key={`${item}-${idx}`}>{item}</option>)}
           </select>
         </label>
         <button type="button" className="rt-button rt-more-filter" onClick={() => setMoreFilters((v) => !v)}><Filter size={13} /> More Filters</button>
@@ -406,7 +427,7 @@ export default function RequirementTraceability() {
           <label className="rt-extra-filter"><span>Priority</span>
             <select value={priority} onChange={(e) => { setPriority(e.target.value); setPage(1); }}>
               <option value="all">All Priorities</option>
-              {PRIORITY_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+              {PRIORITY_OPTIONS.map((item, idx) => <option key={`${item}-${idx}`}>{item}</option>)}
             </select>
           </label>
         )}
@@ -460,29 +481,29 @@ export default function RequirementTraceability() {
                     {!hiddenColumns.includes("title") && <th rowSpan={2}>Requirements</th>}
                     {!hiddenColumns.includes("type") && <th rowSpan={2}>Type</th>}
                     {!hiddenColumns.includes("priority") && <th rowSpan={2}>Priority</th>}
-                    {direction === "req-test" && <th colSpan={testCasesList.filter((id) => !hiddenColumns.includes(id)).length || 1}>Linked Test Cases (TC)</th>}
+                    {direction === "req-test" && <th colSpan={TEST_CASES.filter((id) => !hiddenColumns.includes(id)).length || 1}>Linked Test Cases (TC)</th>}
                     {direction !== "req-test" && <th rowSpan={2}>{direction === "req-story" ? "Linked User Story" : "Linked Deliverables"}</th>}
                     {!hiddenColumns.includes("total") && <th rowSpan={2}>Total TC</th>}
                     {!hiddenColumns.includes("stories") && <th rowSpan={2}>User Stories</th>}
                     {!hiddenColumns.includes("deliverables") && <th rowSpan={2}>Deliverables</th>}
                     {!hiddenColumns.includes("status") && <th rowSpan={2}>Status</th>}
                   </tr>
-                  {direction === "req-test" && <tr>{testCasesList.filter((id) => !hiddenColumns.includes(id)).map((id) => <th key={id}>{id}</th>)}</tr>}
+                  {direction === "req-test" && <tr>{TEST_CASES.filter((id) => !hiddenColumns.includes(id)).map((id) => <th key={id}>{id}</th>)}</tr>}
                 </thead>
                 <tbody>
-                  {pageRows.map((item) => (
-                    <tr key={item.id}>
+                  {pageRows.map((item, rowIdx) => (
+                    <tr key={item.id || `req-row-${rowIdx}`}>
                       {!hiddenColumns.includes("id") && <td><Link href={`/brd-requirements/requirement-detail/${encodeURIComponent(item.id)}`} className="rt-id-link">{item.id}</Link></td>}
                       {!hiddenColumns.includes("title") && <td className="rt-title-cell">{item.title}</td>}
                       {!hiddenColumns.includes("type") && <td>{item.type}</td>}
                       {!hiddenColumns.includes("priority") && <td><Badge value={item.priority} /></td>}
 
-                      {direction === "req-test" && testCasesList.filter((id) => !hiddenColumns.includes(id)).map((testCase) => (
-                        <td className="rt-link-cell" key={testCase}>
+                      {direction === "req-test" && TEST_CASES.filter((id) => !hiddenColumns.includes(id)).map((testCase, tcIdx) => (
+                        <td className="rt-link-cell" key={`${testCase}-${tcIdx}`}>
                           <button
                             type="button"
                             className={item.testCases.includes(testCase) ? "is-linked" : "is-unlinked"}
-                            title={`${item.id}: ${testCase} — click to toggle link`}
+                            title={`${item.id}: ${testCase} — click to toggle demo link`}
                             aria-label={`${item.testCases.includes(testCase) ? "Unlink" : "Link"} ${testCase} to ${item.id}`}
                             onClick={() => changeLink(item.id, testCase)}
                           >
@@ -512,15 +533,15 @@ export default function RequirementTraceability() {
             <div className="rt-graph-view">
               <div className="rt-graph-column">
                 <h3>Requirements</h3>
-                {pageRows.slice(0, 6).map((item) => <div className="rt-graph-node" key={item.id}><FileText size={14} /><span><strong>{item.id}</strong><small>{item.title}</small></span></div>)}
+                {pageRows.slice(0, 6).map((item, idx) => <div className="rt-graph-node" key={item.id || `node-req-${idx}`}><FileText size={14} /><span><strong>{item.id}</strong><small>{item.title}</small></span></div>)}
               </div>
               <div className="rt-graph-links" aria-hidden="true">
-                {pageRows.slice(0, 6).map((item) => <div key={item.id}><ArrowLeftRight size={15} /></div>)}
+                {pageRows.slice(0, 6).map((item, idx) => <div key={item.id || `link-${idx}`}><ArrowLeftRight size={15} /></div>)}
               </div>
               <div className="rt-graph-column">
                 <h3>{direction === "req-test" ? "Test Cases" : direction === "req-story" ? "User Stories" : "Deliverables"}</h3>
-                {pageRows.slice(0, 6).map((item) => (
-                  <div className={`rt-graph-node ${!(direction === "req-test" ? item.testCases.length : direction === "req-story" ? item.userStory : item.deliverables.length) ? "unlinked" : ""}`} key={item.id}>
+                {pageRows.slice(0, 6).map((item, idx) => (
+                  <div className={`rt-graph-node ${!(direction === "req-test" ? item.testCases.length : direction === "req-story" ? item.userStory : item.deliverables.length) ? "unlinked" : ""}`} key={item.id || `node-target-${idx}`}>
                     <GitBranch size={14} /><span><strong>{direction === "req-test" ? item.testCases[0] || "Not linked" : direction === "req-story" ? item.userStory || "Not linked" : item.deliverables[0] || "Not linked"}</strong><small>{direction === "req-test" ? `${item.testCases.length} linked test cases` : "Traceability target"}</small></span>
                   </div>
                 ))}

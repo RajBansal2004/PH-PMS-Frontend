@@ -2,499 +2,307 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Shell } from "../../components/Shell";
-import { StatusBadge } from "../../components/StatusBadge";
-import { getBugs, createBug, updateBug, projects as getProjectsList } from "@/lib/api";
 import {
+  ClipboardCheck,
   CheckCircle2,
-  AlertTriangle,
-  Bug as BugIcon,
-  Search,
-  Filter,
+  Bug,
+  Activity,
   Plus,
-  ShieldCheck,
-  RotateCcw,
   RefreshCw,
-  X,
+  ChevronRight,
+  AlertTriangle,
+  Clock,
 } from "lucide-react";
+import {
+  qaDashboardApi,
+  qaLookupApi,
+  formatShortDate,
+  formatBugStatus,
+  statusBadgeClass,
+} from "@/lib/qa/api";
+import "@/components/qa/qa.css";
 
-type BugItem = {
-  id: string;
-  code: string;
-  title: string;
-  project: string;
-  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-  status: "REPORTED" | "TRIAGE" | "ASSIGNED" | "FIX_IN_PROGRESS" | "FIXED" | "READY_FOR_RETEST" | "CLOSED" | "REOPENED";
-  assignee: string;
-  environment: string;
-  reopenCount: number;
-  date: string;
-  isLive?: boolean;
-};
-
-export default function QaPage() {
-  const [bugs, setBugs] = useState<BugItem[]>([]);
-  const [search, setSearch] = useState("");
-  const [severityFilter, setSeverityFilter] = useState("ALL");
+export default function QaDashboardPage() {
+  const [projectFilter, setProjectFilter] = useState("ALL");
+  const [projects, setProjects] = useState<{ _id: string; projectName: string }[]>([]);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isLiveConnected, setIsLiveConnected] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // New Defect Form State
-  const [newTitle, setNewTitle] = useState("");
-  const [newSeverity, setNewSeverity] = useState<"CRITICAL" | "HIGH" | "MEDIUM" | "LOW">("HIGH");
-  const [newEnv, setNewEnv] = useState("QA / Staging");
-  const [newProjectId, setNewProjectId] = useState("");
-  const [projectsList, setProjectsList] = useState<any[]>([]);
-
-  const fetchBugsData = async () => {
+  const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [res, pRes] = await Promise.allSettled([
-        getBugs(),
-        getProjectsList().catch(() => []),
+      const [dash, projList] = await Promise.all([
+        qaDashboardApi.get({ projectId: projectFilter !== "ALL" ? projectFilter : undefined }),
+        qaLookupApi.projects().catch(() => []),
       ]);
-
-      if (pRes.status === "fulfilled") {
-        const rawP: any = pRes.value;
-        const pItems = Array.isArray(rawP) ? rawP : rawP?.data || rawP?.items || [];
-        setProjectsList(pItems);
-        if (pItems.length > 0 && !newProjectId) {
-          setNewProjectId(pItems[0]._id || pItems[0].id || "");
-        }
-      }
-
-      if (res.status === "fulfilled" && res.value && res.value.items && res.value.items.length > 0) {
-        const mapped: BugItem[] = res.value.items.map((b: any) => ({
-          id: b._id || b.id,
-          code: b.bugId || b.code || `PHT-BUG-${(b._id || "0000").slice(-4).toUpperCase()}`,
-          title: b.title || "Untitled Defect",
-          project: b.projectId?.projectName || b.projectId?.name || b.projectName || "Healthcare PMS",
-          severity: (b.severity || "MEDIUM").toUpperCase() as any,
-          status: (b.status || "REPORTED").toUpperCase() as any,
-          assignee: b.assignedTo?.name || b.assignee || "QA Assigned",
-          environment: b.environment || "QA / Staging",
-          reopenCount: b.reopenCount || 0,
-          date: b.createdAt ? new Date(b.createdAt).toLocaleDateString("en-IN") : "Recent",
-          isLive: true,
-        }));
-        setBugs(mapped);
-        setIsLiveConnected(true);
-      } else {
-        setBugs([]);
-        setIsLiveConnected(true);
-      }
-    } catch {
-      setBugs([]);
-      setIsLiveConnected(false);
+      setData(dash);
+      setProjects(projList);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load QA dashboard");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchBugsData();
-  }, []);
+    loadData();
+  }, [projectFilter]);
 
-  const handleReportDefect = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    const matchedProject = projectsList.find((p) => (p._id || p.id) === newProjectId);
-    const projectName = matchedProject?.name || matchedProject?.projectName || "General Project";
-
-    const newBugItem: BugItem = {
-      id: `BUG-${Date.now()}`,
-      code: `PHT-2026-BUG-00${Math.floor(10 + Math.random() * 90)}`,
-      title: newTitle,
-      project: projectName,
-      severity: newSeverity,
-      status: "REPORTED",
-      assignee: "Triage Lead",
-      environment: newEnv,
-      reopenCount: 0,
-      date: new Date().toLocaleDateString("en-IN"),
-      isLive: true,
-    };
-
-    try {
-      await createBug({
-        projectId: newProjectId || matchedProject?._id || undefined,
-        title: newTitle,
-        severity: newSeverity,
-        environment: newEnv,
-      });
-    } catch {
-      // Local state update ensures immediate UX responsiveness
-    }
-
-    setBugs((prev) => [newBugItem, ...prev]);
-    setShowModal(false);
-    setNewTitle("");
-    alert(`Defect logged successfully under ${newBugItem.code}. Triage notification triggered.`);
+  const kpis = data?.kpis || {
+    totalTestCases: 0,
+    totalTestRuns: 0,
+    executed: 0,
+    passRate: 0,
+    totalBugs: 0,
+    openBugs: 0,
+    criticalBugs: 0,
+    avgResolutionDays: 0,
   };
+  const exec = data?.executionBreakdown || { passed: 0, failed: 0, blocked: 0, notRun: 0 };
+  const sev = data?.bugBySeverity || { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  const bugSt = data?.bugByStatus || { open: 0, inProgress: 0, resolved: 0, closed: 0 };
+  const projectSummary: any[] = data?.projectSummary || [];
+  const moduleSummary: any[] = data?.moduleSummary || [];
+  const recentActivity: any[] = data?.recentActivity || [];
 
-  const handleAdvanceStatus = async (bugId: string, currentStatus: string) => {
-    const nextStatus =
-      currentStatus === "REPORTED"
-        ? "FIX_IN_PROGRESS"
-        : currentStatus === "FIX_IN_PROGRESS"
-        ? "READY_FOR_RETEST"
-        : currentStatus === "READY_FOR_RETEST"
-        ? "CLOSED"
-        : "CLOSED";
-
-    try {
-      if (bugId.length === 24) {
-        await updateBug(bugId, { status: nextStatus });
-      }
-    } catch {
-      // Graceful fallback
-    }
-
-    setBugs((prev) =>
-      prev.map((b) => (b.id === bugId ? { ...b, status: nextStatus as any } : b))
-    );
-  };
-
-  const filtered = bugs.filter((b) => {
-    const matchesSearch =
-      b.title.toLowerCase().includes(search.toLowerCase()) ||
-      b.code.toLowerCase().includes(search.toLowerCase()) ||
-      b.assignee.toLowerCase().includes(search.toLowerCase());
-    const matchesSev = severityFilter === "ALL" || b.severity === severityFilter;
-    return matchesSearch && matchesSev;
-  });
-
-  const criticalOpen = bugs.filter(
-    (b) => b.severity === "CRITICAL" && b.status !== "CLOSED"
-  ).length;
+  const r = 38;
+  const circ = 2 * Math.PI * r;
+  const passArc = (Math.min(100, kpis.passRate) / 100) * circ;
+  const openRatio = kpis.totalBugs > 0 ? Math.round((bugSt.open / kpis.totalBugs) * 100) : 0;
+  const openArc = (openRatio / 100) * circ;
 
   return (
-    <Shell>
+    <div className="qa-page">
+      {/* Header */}
       <div>
-        <div className="page-head">
+        <div className="qa-breadcrumb">
+          <span>QA &amp; Bug Management</span>
+          <ChevronRight size={12} />
+          <span style={{ color: "#10204a", fontWeight: 600 }}>QA Dashboard</span>
+        </div>
+        <div className="qa-header">
           <div>
-            <div className="eyebrow">QUALITY ASSURANCE & DEFECT ENGINE</div>
-            <h1>QA & Bug Management Center</h1>
-            <p>Track test executions, defect lifecycles, and deployment quality sign-off gates (Pending Critical Bugs = 0 required).</p>
+            <h1 className="qa-title">QA Dashboard</h1>
+            <p className="qa-subtitle">Track test case coverage, execution pass rates, bug severity trends, and release quality across projects.</p>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "0.8rem", color: isLiveConnected ? "#059669" : "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: isLiveConnected ? "#059669" : "#94a3b8" }} />
-              {isLiveConnected ? "Live API Connected" : "Local / Seed View"}
-            </span>
-            <button
-              type="button"
-              className="btn outline"
-              onClick={fetchBugsData}
-              disabled={loading}
-              title="Sync defects from backend"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} style={{ marginRight: "4px" }} />
-              {loading ? "Syncing..." : "Sync API"}
+          <div className="qa-actions">
+            <select className="qa-select" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+              <option value="ALL">All Projects</option>
+              {projects.map((p) => <option key={p._id} value={p._id}>{p.projectName}</option>)}
+            </select>
+            <button type="button" className="qa-btn" onClick={loadData} disabled={loading}>
+              <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => setShowModal(true)}
-            >
-              + Report New Defect
-            </button>
+            <Link href="/qa/test-cases/new" className="qa-btn">
+              <Plus size={13} /> Test Case
+            </Link>
+            <Link href="/qa/bugs/new" className="qa-btn qa-btn-primary">
+              <Plus size={13} /> Report Bug
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-navigation */}
+      <div className="qa-subnav">
+        <Link href="/qa" className="qa-subnav-link active">QA Dashboard</Link>
+        <Link href="/qa/test-cases" className="qa-subnav-link">Test Cases</Link>
+        <Link href="/qa/test-cases/new" className="qa-subnav-link">Create Test Case</Link>
+        <Link href="/qa/test-runs" className="qa-subnav-link">Test Runs</Link>
+        <Link href="/qa/bugs" className="qa-subnav-link">Bug Registry</Link>
+        <Link href="/qa/bugs/new" className="qa-subnav-link">Report Bug</Link>
+      </div>
+
+      {error && <div className="qa-alert qa-alert-critical"><AlertTriangle size={14} /> <span>{error}</span></div>}
+
+      {/* KPI Strip matching QA-007 Panel 1 */}
+      <div className="qa-kpi-grid">
+        <div className="qa-kpi">
+          <div className="qa-kpi-icon" style={{ background: "#eff6ff", color: "#0755e9" }}><ClipboardCheck size={16} /></div>
+          <div><span className="qa-kpi-label">Total Test Cases</span><span className="qa-kpi-val">{kpis.totalTestCases}</span></div>
+        </div>
+        <div className="qa-kpi">
+          <div className="qa-kpi-icon" style={{ background: "#f5f3ff", color: "#7c3aed" }}><Activity size={16} /></div>
+          <div><span className="qa-kpi-label">Executed ({kpis.totalTestRuns} Runs)</span><span className="qa-kpi-val">{kpis.executed}</span></div>
+        </div>
+        <div className="qa-kpi">
+          <div className="qa-kpi-icon" style={{ background: "#ecfdf5", color: "#079b62" }}><CheckCircle2 size={16} /></div>
+          <div><span className="qa-kpi-label">Pass Rate</span><span className="qa-kpi-val" style={{ color: "#079b62" }}>{kpis.passRate}%</span></div>
+        </div>
+        <div className="qa-kpi">
+          <div className="qa-kpi-icon" style={{ background: "#fef2f2", color: "#dc2626" }}><Bug size={16} /></div>
+          <div><span className="qa-kpi-label">Total Bugs ({kpis.openBugs} Open)</span><span className="qa-kpi-val">{kpis.totalBugs}</span></div>
+        </div>
+        <div className="qa-kpi">
+          <div className="qa-kpi-icon" style={{ background: "#fffbeb", color: "#d97706" }}><Clock size={16} /></div>
+          <div><span className="qa-kpi-label">Avg Resolution</span><span className="qa-kpi-val">{kpis.avgResolutionDays}d</span></div>
+        </div>
+      </div>
+
+      {/* Row 1 Visuals: Test Execution Donut + Bug Status Donut + Bug Severity Bars */}
+      <div className="qa-grid-3">
+        <div className="qa-card">
+          <div className="qa-card-head"><h3 className="qa-card-title">Test Execution Status</h3></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <svg width="96" height="96" viewBox="0 0 96 96">
+              <circle cx="48" cy="48" r={r} fill="none" stroke="#e2e8f0" strokeWidth="11" />
+              <circle cx="48" cy="48" r={r} fill="none" stroke="#079b62" strokeWidth="11" strokeDasharray={`${passArc} ${circ}`} strokeLinecap="round" transform="rotate(-90 48 48)" />
+              <text x="48" y="47" textAnchor="middle" fontSize="13" fontWeight="700" fill="#10204a">{kpis.executed}</text>
+              <text x="48" y="59" textAnchor="middle" fontSize="8.5" fill="#64748b">Executed</text>
+            </svg>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11 }}>
+              <div><strong style={{ color: "#079b62" }}>● Passed:</strong> {exec.passed}</div>
+              <div><strong style={{ color: "#dc2626" }}>● Failed:</strong> {exec.failed}</div>
+              <div><strong style={{ color: "#d97706" }}>● Blocked:</strong> {exec.blocked}</div>
+              <div><strong style={{ color: "#64748b" }}>● Not Run:</strong> {exec.notRun}</div>
+            </div>
           </div>
         </div>
 
-        {/* METRICS */}
-        <div className="kpi-grid" style={{ marginBottom: "1.5rem" }}>
-          <div className="kpi card">
-            <BugIcon size={24} color="#dc2626" />
-            <div>
-              <small>Critical Open Bugs</small>
-              <strong style={{ color: criticalOpen > 0 ? "#dc2626" : "#059669" }}>
-                {criticalOpen}
-              </strong>
-              <small style={{ color: criticalOpen > 0 ? "#dc2626" : "#059669" }}>
-                {criticalOpen > 0 ? "Deployment Gate Blocked" : "Ready for Sign-off"}
-              </small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <CheckCircle2 size={24} color="#059669" />
-            <div>
-              <small>Test Execution Pass Rate</small>
-              <strong>96.4%</strong>
-              <small style={{ color: "#059669" }}>182 / 189 test cases passed</small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <RotateCcw size={24} color="#d97706" />
-            <div>
-              <small>Defect Reopen Rate</small>
-              <strong>4.2%</strong>
-              <small style={{ color: "#059669" }}>Healthy industry standard (&lt; 8%)</small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <ShieldCheck size={24} color="#2563eb" />
-            <div>
-              <small>Release Candidate Gate</small>
-              <strong>v1.3.0 Staging</strong>
-              <small style={{ color: "#2563eb" }}>QA Lead sign-off in progress</small>
+        <div className="qa-card">
+          <div className="qa-card-head"><h3 className="qa-card-title">Bug Status</h3></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <svg width="96" height="96" viewBox="0 0 96 96">
+              <circle cx="48" cy="48" r={r} fill="none" stroke="#079b62" strokeWidth="11" />
+              <circle cx="48" cy="48" r={r} fill="none" stroke="#dc2626" strokeWidth="11" strokeDasharray={`${openArc} ${circ}`} transform="rotate(-90 48 48)" />
+              <text x="48" y="47" textAnchor="middle" fontSize="13" fontWeight="700" fill="#10204a">{kpis.totalBugs}</text>
+              <text x="48" y="59" textAnchor="middle" fontSize="8.5" fill="#64748b">Bugs</text>
+            </svg>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11 }}>
+              <div><strong style={{ color: "#dc2626" }}>● Open:</strong> {bugSt.open}</div>
+              <div><strong style={{ color: "#0755e9" }}>● In Progress / Retest:</strong> {bugSt.inProgress}</div>
+              <div><strong style={{ color: "#079b62" }}>● Fixed:</strong> {bugSt.resolved}</div>
+              <div><strong style={{ color: "#64748b" }}>● Closed:</strong> {bugSt.closed}</div>
             </div>
           </div>
         </div>
 
-        {/* SEARCH & FILTERS */}
-        <div style={{ display: "flex", gap: "12px", marginBottom: "1rem" }}>
-          <div style={{ flex: 1, position: "relative" }}>
-            <Search size={16} style={{ position: "absolute", left: "12px", top: "12px", color: "#94a3b8" }} />
-            <input
-              type="text"
-              placeholder="Search bugs by ID (e.g. PHT-2026-BUG-0014), title, assignee..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: "100%", padding: "10px 10px 10px 38px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-            />
+        <div className="qa-card">
+          <div className="qa-card-head"><h3 className="qa-card-title">Bugs by Severity</h3></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[
+              { label: "Critical", val: sev.CRITICAL, color: "#dc2626" },
+              { label: "High", val: sev.HIGH, color: "#ea580c" },
+              { label: "Medium", val: sev.MEDIUM, color: "#f59e0b" },
+              { label: "Low", val: sev.LOW, color: "#64748b" },
+            ].map((row) => (
+              <div key={row.label}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, marginBottom: 2 }}>
+                  <span style={{ fontWeight: 600 }}>{row.label}</span>
+                  <strong>{row.val}</strong>
+                </div>
+                <div className="qa-bar-track">
+                  <div className="qa-bar-fill" style={{ width: `${kpis.totalBugs > 0 ? Math.round((row.val / kpis.totalBugs) * 100) : 0}%`, background: row.color }} />
+                </div>
+              </div>
+            ))}
           </div>
-          <select
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value)}
-            style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-          >
-            <option value="ALL">All Severities</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
-          </select>
         </div>
+      </div>
 
-        {/* BUG TABLE */}
-        <div className="card">
-          <div className="data-table">
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+      {/* Row 2: Project-Wise QA Summary + Module-Wise QA Status */}
+      <div className="qa-grid-2">
+        <div className="qa-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #e3eaf4" }}>
+            <h3 className="qa-card-title">Project-Wise QA Summary</h3>
+          </div>
+          <div className="qa-table-wrap">
+            <table className="qa-table">
               <thead>
-                <tr style={{ borderBottom: "1px solid #e2e8f0", fontSize: "0.8rem", color: "#64748b", textTransform: "uppercase" }}>
-                  <th style={{ padding: "12px" }}>Bug Code & Title</th>
-                  <th style={{ padding: "12px" }}>Project</th>
-                  <th style={{ padding: "12px" }}>Severity</th>
-                  <th style={{ padding: "12px" }}>Status</th>
-                  <th style={{ padding: "12px" }}>Assignee</th>
-                  <th style={{ padding: "12px" }}>Environment</th>
-                  <th style={{ padding: "12px" }}>Actions</th>
+                <tr>
+                  <th>Project</th>
+                  <th>Test Cases</th>
+                  <th>Pass %</th>
+                  <th>Open Bugs</th>
+                  <th>Closed</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && bugs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                      <RefreshCw size={28} className="animate-spin" style={{ margin: "0 auto 8px" }} />
-                      <div>Loading live defects from QA API...</div>
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                      <div>No defect records found from API.</div>
-                    </td>
-                  </tr>
+                {projectSummary.length === 0 ? (
+                  <tr><td colSpan={5} className="qa-empty">No project QA data yet.</td></tr>
                 ) : (
-                  filtered.map((bug) => (
-                    <tr key={bug.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
-                    <td style={{ padding: "12px", maxWidth: "340px" }}>
-                      <span style={{ fontSize: "0.75rem", color: "#2563eb", fontWeight: "bold" }}>{bug.code}</span>
-                      <div style={{ fontWeight: "600", color: "#0f172a", marginTop: "2px" }}>{bug.title}</div>
-                      {bug.reopenCount > 0 && (
-                        <small style={{ color: "#dc2626", fontWeight: "bold" }}>Reopened {bug.reopenCount} time(s)</small>
-                      )}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <div style={{ fontWeight: "500" }}>{bug.project}</div>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <span
-                        style={{
-                          fontSize: "0.75rem",
-                          fontWeight: "bold",
-                          padding: "2px 8px",
-                          borderRadius: "4px",
-                          background:
-                            bug.severity === "CRITICAL"
-                              ? "#fee2e2"
-                              : bug.severity === "HIGH"
-                              ? "#ffedd5"
-                              : bug.severity === "MEDIUM"
-                              ? "#fef9c3"
-                              : "#f1f5f9",
-                          color:
-                            bug.severity === "CRITICAL"
-                              ? "#991b1b"
-                              : bug.severity === "HIGH"
-                              ? "#9a3412"
-                              : bug.severity === "MEDIUM"
-                              ? "#854d0e"
-                              : "#475569",
-                        }}
-                      >
-                        {bug.severity}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <StatusBadge tone={bug.status === "CLOSED" ? "green" : bug.status === "FIX_IN_PROGRESS" ? "amber" : "blue"}>
-                        {bug.status.replace(/_/g, " ")}
-                      </StatusBadge>
-                    </td>
-                    <td style={{ padding: "12px" }}>{bug.assignee}</td>
-                    <td style={{ padding: "12px" }}>
-                      <small style={{ background: "#f8fafc", padding: "2px 6px", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
-                        {bug.environment}
-                      </small>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        {bug.status !== "CLOSED" && (
-                          <button
-                            type="button"
-                            className="btn primary small"
-                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-                            onClick={() => handleAdvanceStatus(bug.id, bug.status)}
-                            title="Advance bug to next workflow stage"
-                          >
-                            Advance →
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn outline small"
-                          style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-                          onClick={() => alert(`Bug Details:\nID: ${bug.code}\nTitle: ${bug.title}\nSeverity: ${bug.severity}\nStatus: ${bug.status}\nEnvironment: ${bug.environment}`)}
-                        >
-                          Inspect
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )))}
+                  projectSummary.map((p) => (
+                    <tr key={p.projectId}>
+                      <td><strong>{p.projectName}</strong></td>
+                      <td>{p.totalTestCases}</td>
+                      <td><span className="qa-badge qa-badge-green">{p.passRate}%</span></td>
+                      <td style={{ color: p.openBugs > 0 ? "#dc2626" : "#64748b", fontWeight: 700 }}>{p.openBugs}</td>
+                      <td>{p.closedBugs}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* REPORT DEFECT MODAL */}
-        {showModal && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: "rgba(15, 23, 42, 0.6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 9999,
-              padding: "20px",
-            }}
-          >
-            <div
-              className="card"
-              style={{
-                width: "100%",
-                maxWidth: "520px",
-                background: "#ffffff",
-                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px", marginBottom: "16px" }}>
-                <b style={{ fontSize: "1.1rem" }}>Report Defect / Incident</b>
-                <button type="button" onClick={() => setShowModal(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b" }}>
-                  <X size={20} />
-                </button>
-              </div>
-
-              <form onSubmit={handleReportDefect}>
-                <div style={{ marginBottom: "14px" }}>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "600", marginBottom: "6px" }}>
-                    Defect Title / Summary *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Telehealth call stream breaks when audio codec switches"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "14px" }}>
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "600", marginBottom: "6px" }}>
-                      Severity *
-                    </label>
-                    <select
-                      value={newSeverity}
-                      onChange={(e) => setNewSeverity(e.target.value as any)}
-                      style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                    >
-                      <option value="CRITICAL">CRITICAL (Blocks Sign-off)</option>
-                      <option value="HIGH">HIGH (Degraded Service)</option>
-                      <option value="MEDIUM">MEDIUM (Functional Glitch)</option>
-                      <option value="LOW">LOW (Cosmetic)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "600", marginBottom: "6px" }}>
-                      Environment *
-                    </label>
-                    <select
-                      value={newEnv}
-                      onChange={(e) => setNewEnv(e.target.value)}
-                      style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                    >
-                      <option value="QA / Staging">QA / Staging</option>
-                      <option value="Production Replica">Production Replica</option>
-                      <option value="Integration Testbed">Integration Testbed</option>
-                      <option value="Production">Production Hotfix</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: "16px" }}>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "600", marginBottom: "6px" }}>
-                    Project Association *
-                  </label>
-                  <select
-                    value={newProjectId}
-                    onChange={(e) => setNewProjectId(e.target.value)}
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  >
-                    {projectsList.length > 0 ? (
-                      projectsList.map((p) => (
-                        <option key={p._id || p.id} value={p._id || p.id}>
-                          {p.name || p.projectName}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">General Project</option>
-                    )}
-                  </select>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
-                  <button type="button" className="btn outline" onClick={() => setShowModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn primary">
-                    Log Defect & Dispatch Alert
-                  </button>
-                </div>
-              </form>
-            </div>
+        <div className="qa-card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #e3eaf4" }}>
+            <h3 className="qa-card-title">Module-Wise QA Status</h3>
           </div>
-        )}
+          <div className="qa-table-wrap">
+            <table className="qa-table">
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Test Cases</th>
+                  <th>Approved</th>
+                  <th>Open Bugs</th>
+                  <th>Total Bugs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {moduleSummary.length === 0 ? (
+                  <tr><td colSpan={5} className="qa-empty">Create test cases or report bugs to see module breakdown.</td></tr>
+                ) : (
+                  moduleSummary.map((m) => (
+                    <tr key={m.module}>
+                      <td><strong>{m.module}</strong></td>
+                      <td>{m.totalTestCases}</td>
+                      <td>{m.approvedTestCases}</td>
+                      <td style={{ color: m.openBugs > 0 ? "#dc2626" : "#64748b", fontWeight: 700 }}>{m.openBugs}</td>
+                      <td>{m.totalBugs}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </Shell>
+
+      {/* Recent Activity */}
+      <div className="qa-card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid #e3eaf4", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 className="qa-card-title">Recent QA Activity</h3>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Link href="/qa/test-runs" className="qa-btn qa-btn-sm">Test Runs</Link>
+            <Link href="/qa/bugs" className="qa-btn qa-btn-sm">All Bugs</Link>
+          </div>
+        </div>
+        <div className="qa-table-wrap">
+          <table className="qa-table">
+            <thead><tr><th>Type</th><th>Item</th><th>Status</th><th>By</th><th>Updated</th></tr></thead>
+            <tbody>
+              {recentActivity.length === 0 ? (
+                <tr><td colSpan={5} className="qa-empty">No recent QA activity recorded yet.</td></tr>
+              ) : (
+                recentActivity.map((act, i) => (
+                  <tr key={i}>
+                    <td><span className="qa-badge qa-badge-slate">{act.type}</span></td>
+                    <td><Link href={act.href} style={{ fontWeight: 600, color: "#0755e9", textDecoration: "none" }}>{act.title}</Link></td>
+                    <td><span className={statusBadgeClass(act.status)}>{formatBugStatus(act.status)}</span></td>
+                    <td>{act.by}</td>
+                    <td style={{ color: "#64748b" }}>{formatShortDate(act.timestamp)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

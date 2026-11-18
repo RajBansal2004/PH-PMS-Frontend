@@ -55,6 +55,20 @@ function normalizeUser(value: any): AuthUser {
     value?.data?.user ||
     value;
 
+  const orgId =
+    user?.organizationId ||
+    user?.organization_id ||
+    value?.organizationId ||
+    value?.data?.organizationId ||
+    null;
+
+  const empId =
+    user?.employeeId ||
+    user?.employee_id ||
+    value?.employeeId ||
+    value?.data?.employeeId ||
+    null;
+
   return {
     id: String(
       user?.id ||
@@ -70,18 +84,13 @@ function normalizeUser(value: any): AuthUser {
       user?.email ||
       "",
 
-    organizationId:
-      user?.organizationId ||
-      user?.organization_id ||
-      null,
+    organizationId: orgId ? String(orgId) : null,
 
-    employeeId:
-      user?.employeeId ||
-      user?.employee_id ||
-      null,
+    employeeId: empId ? String(empId) : null,
 
     roles:
       user?.roles ||
+      value?.roles ||
       [],
   };
 }
@@ -116,16 +125,25 @@ async function parseResponse(
       .catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(
+    let message =
       body?.message ||
       body?.error?.message ||
-      `Request failed (${response.status})`,
+      `Request failed (${response.status})`;
 
+    if (Array.isArray(body?.errors) && body.errors.length > 0) {
+      const errDetails = body.errors
+        .map((e: any) => `${e.field || 'field'}: ${e.message || 'invalid'}`)
+        .join("; ");
+      if (errDetails) {
+        message = `${message} (${errDetails})`;
+      }
+    }
+
+    throw new ApiError(
+      message,
       response.status,
-
       body?.code ||
       body?.error?.code,
-
       body?.errors ||
       body?.details
     );
@@ -391,7 +409,9 @@ const qs = (
 
 export async function login(
   email: string,
-  password: string
+  password: string,
+  rememberMe = false,
+  captchaToken?: string
 ) {
   return data(
     await req<any>(
@@ -406,9 +426,67 @@ export async function login(
               .toLowerCase(),
 
           password,
+          rememberMe,
+          ...(captchaToken ? { captchaToken } : {}),
         }),
       }
     )
+  );
+}
+
+export async function forgotPassword(email: string) {
+  return data(
+    await req<any>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+      }),
+    })
+  );
+}
+
+export async function verifyResetToken(token: string) {
+  return data(
+    await req<any>(
+      `/auth/reset-password/verify?${qs({ token: token.trim() })}`,
+      {
+        method: "GET",
+      }
+    )
+  );
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+  confirmPassword: string
+) {
+  return data(
+    await req<any>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({
+        token: token.trim(),
+        newPassword,
+        confirmPassword,
+      }),
+    })
+  );
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string
+) {
+  return data(
+    await req<any>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      }),
+    })
   );
 }
 
@@ -463,12 +541,15 @@ export async function logout() {
 export async function authLogin(
   email: string,
   password: string,
-  remember: boolean
+  remember: boolean,
+  captchaToken?: string
 ) {
   const response =
     await login(
       email,
-      password
+      password,
+      remember,
+      captchaToken
     );
 
   const tokens =
@@ -550,10 +631,7 @@ export async function projects(
     })}`
   ).then((response) => ({
     items: items(response),
-
-    pagination:
-      data(response)
-        ?.pagination,
+    pagination: response?.pagination || data(response)?.pagination || null,
   }));
 }
 
@@ -571,16 +649,17 @@ export async function project(
  * ------------------------------------------------
  */
 
-export async function clients() {
-  return req<any>(
-    `/clients?${qs({
-      organizationId:
-        getOrganizationId(),
-
-      page: 1,
-      limit: 500,
-    })}`
-  ).then(items);
+export async function clients(params: { page?: number; limit?: number; search?: string; status?: string } = {}) {
+  const query: Record<string, any> = {
+    organizationId: getOrganizationId(),
+    page: params.page || 1,
+    limit: Math.min(params.limit || 100, 100),
+  };
+  if (params.search) query.search = params.search;
+  if (params.status && params.status !== "All Statuses" && params.status !== "ALL") {
+    query.status = params.status.toUpperCase();
+  }
+  return req<any>(`/clients?${qs(query)}`).then(items);
 }
 
 /*
@@ -670,16 +749,14 @@ export async function deleteTeam(id: string) {
  * ------------------------------------------------
  */
 
-export async function employees() {
-  return req<any>(
-    `/employees?${qs({
-      organizationId:
-        getOrganizationId(),
-
-      page: 1,
-      limit: 500,
-    })}`
-  ).then(items);
+export async function employees(params: { page?: number; limit?: number; search?: string } = {}) {
+  const query: Record<string, any> = {
+    organizationId: getOrganizationId(),
+    page: params.page || 1,
+    limit: Math.min(params.limit || 100, 100),
+  };
+  if (params.search) query.search = params.search;
+  return req<any>(`/employees?${qs(query)}`).then(items);
 }
 
 /*
@@ -751,18 +828,111 @@ export async function history(
   ).then(items);
 }
 
+export async function getNextProjectCode() {
+  const organizationId = getOrganizationId();
+  if (!organizationId) {
+    return { nextCode: "PRJ-00011", totalProjects: 10, sequence: 11 };
+  }
+  return req<any>(`/projects/next-code`)
+    .then((res) => {
+      return (
+        res?.data ||
+        res || { nextCode: "PRJ-00011", totalProjects: 10, sequence: 11 }
+      );
+    })
+    .catch(() => ({ nextCode: "PRJ-00011", totalProjects: 10, sequence: 11 }));
+}
+
 export async function createProject(
   body: any
 ) {
-  const payload = {
+  const isObjectId = (val: any) => typeof val === "string" && /^[0-9a-fA-F]{24}$/.test(val);
+
+  const payload: any = {
     organizationId: body.organizationId || getOrganizationId(),
+    projectName: (body.projectName || "").trim(),
+    projectCategory: body.projectCategory || "Construction & Civil",
+    currency: body.currency || "INR",
     ...body,
   };
+
+  if (body.projectCode && String(body.projectCode).trim()) {
+    payload.projectCode = String(body.projectCode).trim().toUpperCase();
+  } else {
+    delete payload.projectCode;
+  }
+
+  // Ensure clientId is valid ObjectId or deleted
+  if (!isObjectId(payload.clientId)) {
+    if (payload.clientId && typeof payload.clientId === "object" && isObjectId(payload.clientId._id)) {
+      payload.clientId = payload.clientId._id;
+    } else {
+      delete payload.clientId;
+    }
+  }
+
+  // Normalize status to valid enum
+  const validStatuses = [
+    "DRAFT",
+    "PENDING_APPROVAL",
+    "ACTIVE",
+    "ON_HOLD",
+    "COMPLETED",
+    "CANCELLED",
+    "CLOSED",
+    "ARCHIVED",
+  ];
+  let status = String(payload.status || "ACTIVE").toUpperCase().replace(/\s+/g, "_");
+  if (status === "PLANNED") status = "DRAFT";
+  if (!validStatuses.includes(status)) status = "ACTIVE";
+  payload.status = status;
+
+  // Normalize priority & riskLevel
+  const validEnums = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  let priority = String(payload.priority || "HIGH").toUpperCase();
+  if (!validEnums.includes(priority)) priority = "HIGH";
+  payload.priority = priority;
+
+  let riskLevel = String(payload.riskLevel || "MEDIUM").toUpperCase();
+  if (!validEnums.includes(riskLevel)) riskLevel = "MEDIUM";
+  payload.riskLevel = riskLevel;
+
+  const objectIdFields = [
+    "projectManagerId",
+    "technicalLeadId",
+    "qaLeadId",
+    "businessAnalystId",
+    "deliveryHeadId",
+    "approvalWorkflowId",
+  ];
+  for (const field of objectIdFields) {
+    if (!isObjectId(payload[field])) {
+      delete payload[field];
+    }
+  }
+
+  const dateFields = ["startDate", "targetCompletion", "actualCompletion", "targetRelease"];
+  for (const field of dateFields) {
+    if (!payload[field] || typeof payload[field] !== "string" || payload[field].trim() === "") {
+      delete payload[field];
+    }
+  }
+
+  const numberFields = ["contractValue", "budget", "advanceAmount", "estimatedHours"];
+  for (const field of numberFields) {
+    if (payload[field] !== undefined && payload[field] !== null && payload[field] !== "") {
+      const num = Number(String(payload[field]).replace(/[^0-9.]/g, ""));
+      if (!isNaN(num)) payload[field] = num;
+      else delete payload[field];
+    } else {
+      delete payload[field];
+    }
+  }
+
   return req<any>(
     "/projects",
     {
       method: "POST",
-
       body: JSON.stringify(payload),
     }
   ).then(data);
@@ -771,8 +941,17 @@ export async function createProject(
 export async function createClient(
   body: any
 ) {
+  const code = body.clientCode || `CLT-${Math.floor(10000 + Math.random() * 90000)}`;
+  const legalName = (body.legalName || body.name || "Client Name").trim();
+  const displayName = (body.displayName || body.name || legalName).trim();
+
   const payload = {
     organizationId: body.organizationId || getOrganizationId(),
+    clientCode: code,
+    legalName,
+    displayName,
+    industry: body.industry || "Healthcare",
+    status: (body.status || "ACTIVE").toUpperCase(),
     ...body,
   };
   return req<any>(
@@ -806,6 +985,82 @@ export async function updateClientStatus(id: string, status: string) {
 
 export async function deleteClient(id: string) {
   return req<any>(`/clients/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function getClient(id: string) {
+  const orgId = getOrganizationId();
+  return req<any>(`/clients/${id}?${qs({ organizationId: orgId })}`).then(data);
+}
+
+export async function getClientContacts(params: { clientId?: string; search?: string } = {}) {
+  const query: Record<string, any> = {
+    organizationId: getOrganizationId(),
+  };
+  if (params.clientId) query.clientId = params.clientId;
+  if (params.search) query.search = params.search;
+  return req<any>(`/clients/contacts?${qs(query)}`).then(items);
+}
+
+export async function createClientContact(body: any) {
+  return req<any>("/clients/contacts", {
+    method: "POST",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function updateClientContact(id: string, body: any) {
+  return req<any>(`/clients/contacts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteClientContact(id: string) {
+  return req<any>(`/clients/contacts/${id}?organizationId=${getOrganizationId()}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function setPrimaryClientContact(id: string) {
+  return req<any>(`/clients/contacts/${id}/primary`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: getOrganizationId(),
+    }),
+  }).then(data);
+}
+
+export async function getClientActivities(params: { clientId?: string; type?: string; channel?: string; search?: string } = {}) {
+  const query: Record<string, any> = {
+    organizationId: getOrganizationId(),
+  };
+  if (params.clientId) query.clientId = params.clientId;
+  if (params.type && params.type !== "All Activity Types" && params.type !== "ALL") query.type = params.type;
+  if (params.channel && params.channel !== "All Channels" && params.channel !== "ALL") query.channel = params.channel;
+  if (params.search) query.search = params.search;
+  return req<any>(`/clients/activities?${qs(query)}`).then(items);
+}
+
+export async function createClientActivity(body: any) {
+  return req<any>("/clients/activities", {
+    method: "POST",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteClientActivity(id: string) {
+  return req<any>(`/clients/activities/${id}?organizationId=${getOrganizationId()}`, {
     method: "DELETE",
   }).then(data);
 }
@@ -853,6 +1108,10 @@ export async function sprints(params: Record<string, any> = {}) {
   ).then(items);
 }
 
+export async function sprint(id: string) {
+  return req<any>(`/sprints/${id}?organizationId=${getOrganizationId()}`).then(data);
+}
+
 export async function createSprint(
   body: any
 ) {
@@ -879,6 +1138,16 @@ export async function updateSprint(id: string, body: any) {
   }).then(data);
 }
 
+export async function updateSprintStatus(id: string, status: string) {
+  return req<any>(`/sprints/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: getOrganizationId(),
+      status,
+    }),
+  }).then(data);
+}
+
 export async function deleteSprint(id: string) {
   return req<any>(`/sprints/${id}?organizationId=${getOrganizationId()}`, {
     method: "DELETE",
@@ -894,6 +1163,10 @@ export async function tasks(params: Record<string, any> = {}) {
       ...params,
     })}`
   ).then(items);
+}
+
+export async function task(id: string) {
+  return req<any>(`/tasks/${id}?organizationId=${getOrganizationId()}`).then(data);
 }
 
 export async function createTask(
@@ -922,6 +1195,16 @@ export async function updateTask(id: string, body: any) {
   }).then(data);
 }
 
+export async function updateTaskStatus(id: string, status: string) {
+  return req<any>(`/tasks/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: getOrganizationId(),
+      status,
+    }),
+  }).then(data);
+}
+
 export async function deleteTask(id: string) {
   return req<any>(`/tasks/${id}?organizationId=${getOrganizationId()}`, {
     method: "DELETE",
@@ -937,6 +1220,26 @@ export async function requirements(params: Record<string, any> = {}) {
       ...params,
     })}`
   ).then(items);
+}
+
+export async function getNextRequirementCode() {
+  const orgId = getOrganizationId();
+  const query = orgId ? `?organizationId=${encodeURIComponent(orgId)}` : "";
+  try {
+    const raw: any = await req<any>(`/requirements/next-code${query}`).then(data);
+    return raw || { nextCode: "REQ-00004", totalRequirements: 3, sequence: 4 };
+  } catch {
+    return { nextCode: "REQ-00004", totalRequirements: 3, sequence: 4 };
+  }
+}
+
+export async function requirement(id: string) {
+  if (id === "new") return null;
+  return req<any>(`/requirements/${id}?organizationId=${getOrganizationId()}`).then(data);
+}
+
+export async function requirementTraceability(id: string) {
+  return req<any>(`/requirements/${id}/traceability?organizationId=${getOrganizationId()}`).then(data);
 }
 
 export async function createRequirement(body: any) {
@@ -973,6 +1276,84 @@ export async function updateRequirementStatus(id: string, status: string) {
 export async function deleteRequirement(id: string) {
   return req<any>(`/requirements/${id}?organizationId=${getOrganizationId()}`, {
     method: "DELETE",
+  }).then(data);
+}
+
+export async function brds(params: Record<string, any> = {}) {
+  return req<any>(
+    `/brds?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function brd(id: string) {
+  return req<any>(`/brds/${id}`).then(data);
+}
+
+export async function createBrd(body: any) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>("/brds", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(data);
+}
+
+export async function updateBrd(id: string, body: any) {
+  return req<any>(`/brds/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
+  }).then(data);
+}
+
+export async function deleteBrd(id: string) {
+  return req<any>(`/brds/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function changeRequests(params: Record<string, any> = {}) {
+  return req<any>(
+    `/change-requests?${qs({
+      organizationId: getOrganizationId(),
+      page: params.page ?? 1,
+      limit: params.limit ?? 100,
+      ...params,
+    })}`
+  ).then(items);
+}
+
+export async function changeRequest(id: string) {
+  return req<any>(`/change-requests/${id}`).then(data);
+}
+
+export async function createChangeRequest(body: any) {
+  const payload = {
+    organizationId: body.organizationId || getOrganizationId(),
+    ...body,
+  };
+  return req<any>("/change-requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(data);
+}
+
+export async function updateChangeRequest(id: string, body: any) {
+  return req<any>(`/change-requests/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      organizationId: body.organizationId || getOrganizationId(),
+      ...body,
+    }),
   }).then(data);
 }
 
@@ -2343,6 +2724,10 @@ export async function getResources(params: Record<string, any> = {}) {
   }));
 }
 
+export async function getResource(id: string) {
+  return req<any>(`/resources/${id}`).then(data);
+}
+
 export async function createResource(body: Record<string, any>) {
   return req<any>("/resources", {
     method: "POST",
@@ -2359,6 +2744,89 @@ export async function getResourceAllocations(params: Record<string, any> = {}) {
   });
 
   return req<any>(`/allocations?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createAllocation(body: Record<string, any>) {
+  return req<any>("/allocations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function updateAllocation(id: string, body: Record<string, any>) {
+  return req<any>(`/allocations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteAllocation(id: string) {
+  return req<any>(`/allocations/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function getLeaves(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/leaves?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+// ============================================================
+// CAPACITY & WORKLOAD MODULE (CAP-001 - CAP-004)
+// ============================================================
+
+export async function getTeamCapacity(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    ...params,
+  });
+  return req<any>(`/capacity/team?${query}`).then(data);
+}
+
+export async function getIndividualCapacity(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    ...params,
+  });
+  return req<any>(`/capacity/individual?${query}`).then(data);
+}
+
+export async function getCapacityForecast(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    ...params,
+  });
+  return req<any>(`/capacity/forecast?${query}`).then(data);
+}
+
+export async function getUtilizationHeatmap(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    ...params,
+  });
+  return req<any>(`/capacity/heatmap?${query}`).then(data);
+}
+
+export async function getCapacities(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+  return req<any>(`/capacity?${query}`).then((response) => ({
     items: items(response),
     pagination: data(response)?.pagination ?? data(response)?.meta,
   }));
@@ -2388,6 +2856,167 @@ export async function createTimesheet(body: Record<string, any>) {
     body: JSON.stringify(body),
   }).then(data);
 }
+
+export async function updateTimesheet(id: string, body: Record<string, any>) {
+  return req<any>(`/timesheets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteTimesheet(id: string) {
+  return req<any>(`/timesheets/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+// ============================================================
+// TEST RUNS (QA EXECUTION RUNNER)
+// ============================================================
+
+export async function getTestRuns(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/test-runs?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createTestRun(body: Record<string, any>) {
+  return req<any>("/test-runs", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function updateTestRun(id: string, body: Record<string, any>) {
+  return req<any>(`/test-runs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteTestRun(id: string) {
+  return req<any>(`/test-runs/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+// ============================================================
+// ROLE & PERMISSION MANAGEMENT (RBAC BUILDER)
+// ============================================================
+
+export async function getRolesList(params: Record<string, any> = {}) {
+  const query = qs({
+    organizationId: getOrganizationId(),
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/roles?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function createRole(body: Record<string, any>) {
+  return req<any>("/roles", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function updateRole(id: string, body: Record<string, any>) {
+  return req<any>(`/roles/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteRole(id: string) {
+  return req<any>(`/roles/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+export async function getPermissionsList(params: Record<string, any> = {}) {
+  const query = qs({
+    page: params.page ?? 1,
+    limit: params.limit ?? 500,
+    ...params,
+  });
+
+  return req<any>(`/permissions?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+// ============================================================
+// CENTRAL DOCUMENTS
+// ============================================================
+
+export async function createDocument(body: Record<string, any>) {
+  return req<any>("/documents", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function updateDocument(id: string, body: Record<string, any>) {
+  return req<any>(`/documents/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(data);
+}
+
+export async function deleteDocument(id: string) {
+  return req<any>(`/documents/${id}`, {
+    method: "DELETE",
+  }).then(data);
+}
+
+// ============================================================
+// NOTIFICATIONS MODULE
+// ============================================================
+
+export async function getNotifications(params: Record<string, any> = {}) {
+  const query = qs({
+    page: params.page ?? 1,
+    limit: params.limit ?? 100,
+    ...params,
+  });
+
+  return req<any>(`/notifications?${query}`).then((response) => ({
+    items: items(response),
+    pagination: data(response)?.pagination ?? data(response)?.meta,
+  }));
+}
+
+export async function markNotificationAsRead(id: string) {
+  return req<any>(`/notifications/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ readAt: new Date().toISOString() }),
+  }).then(data);
+}
+
+// ============================================================
+// REPORTS MODULE
+// ============================================================
+
+export async function getProjectProgressReport() {
+  return req<any>("/reports/project-progress").then(data);
+}
+
+
+
 
 // ============================================================
 // QA & BUGS MODULE

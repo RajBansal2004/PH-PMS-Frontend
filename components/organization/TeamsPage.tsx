@@ -205,10 +205,21 @@ export default function TeamsPage() {
   const totalMembers = teams.reduce((sum, team) => sum + team.members, 0);
   const projectTeams = teams.filter((team) => team.projects > 0).length;
 
-  const departments = useMemo(
-    () => [...new Set(teams.map((team) => team.department))],
-    [teams],
-  );
+  const departments = useMemo(() => {
+    const names = new Set<string>();
+    deptList.forEach((d) => {
+      if (d?.name) names.add(String(d.name));
+    });
+    teams.forEach((team) => {
+      if (team.department) names.add(team.department);
+    });
+    if (names.size === 0) {
+      ["Engineering", "Product", "QA & Testing", "Operations", "General"].forEach((d) =>
+        names.add(d)
+      );
+    }
+    return Array.from(names);
+  }, [deptList, teams]);
 
   const filtered = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -394,10 +405,7 @@ export default function TeamsPage() {
         </div>
         <div className="tm-header-actions">
           <label className="tm-search"><Search size={13} /><input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Search teams, code, lead..." /><kbd>/</kbd></label>
-          <button type="button" className="tm-round-btn" aria-label="Create team" onClick={openCreate}><Plus size={18} /></button>
-          <button type="button" className="tm-icon-btn" aria-label="Notifications" onClick={() => setNotice("Notifications are not connected yet.")}><Bell size={16} /><i>0</i></button>
-          <button type="button" className="tm-icon-btn" aria-label="Help" onClick={() => setNotice("Open your organization help center to learn about teams.")}><CircleHelp size={16} /></button>
-          <button type="button" className="tm-user" onClick={() => setNotice("Signed in as Mayank Swaroop · Super Admin.")}><Avatar name="Mayank Swaroop" /><span><strong>Mayank Swaroop</strong><small>Super Admin</small></span><ChevronDown size={12} /></button>
+          <button type="button" className="tm-btn tm-btn-primary" onClick={openCreate}><Plus size={14} /> Add Team</button>
         </div>
       </header>
 

@@ -48,6 +48,101 @@ type BrdRecord = BrdListResponse["items"][number];
 
 const PAGE_SIZE = 10;
 
+const DEMO_BRDS: BrdRecord[] = [
+  {
+    id: "BRD-24-001",
+    title: "AI-CMS Implementation BRD",
+    projectId: "PRJ-001",
+    projectName: "AI-CMS Platform",
+    clientName: "Apollo Hospitals",
+    type: "Business Requirement Document",
+    version: "v1.2",
+    status: "Approved" as any,
+    priority: "High" as any,
+    confidentiality: "Confidential",
+    description: "Enterprise clinical management system business requirements.",
+    estimatedPages: 24,
+    estimatedEffortHours: 320,
+    targetReleaseDate: "2025-06-30",
+    reviewDueDate: "2025-05-20",
+    nextReviewDate: "2025-06-01",
+    tags: ["Healthcare", "EMR", "Clinical"],
+    createdAt: "2025-01-15T09:00:00.000Z",
+    updatedAt: "2025-05-16T14:30:00.000Z",
+    createdBy: "Mayank Swaroop",
+    updatedBy: "Rahul Verma",
+  },
+  {
+    id: "BRD-24-002",
+    title: "Mobile Patient App BRD",
+    projectId: "PRJ-002",
+    projectName: "Mobile App",
+    clientName: "Apollo Hospitals",
+    type: "Functional Requirement Document",
+    version: "v1.0",
+    status: "In Review" as any,
+    priority: "High" as any,
+    confidentiality: "Confidential",
+    description: "Patient facing mobile application for appointments and lab records.",
+    estimatedPages: 18,
+    estimatedEffortHours: 240,
+    targetReleaseDate: "2025-07-15",
+    reviewDueDate: "2025-05-25",
+    nextReviewDate: "2025-06-05",
+    tags: ["Mobile", "iOS", "Android"],
+    createdAt: "2025-02-10T11:00:00.000Z",
+    updatedAt: "2025-05-15T16:00:00.000Z",
+    createdBy: "Amit Kumar",
+    updatedBy: "Amit Kumar",
+  },
+  {
+    id: "BRD-24-003",
+    title: "Patient Telehealth Portal BRD",
+    projectId: "PRJ-003",
+    projectName: "Patient Portal",
+    clientName: "Max Healthcare",
+    type: "Business Requirement Document",
+    version: "v0.8",
+    status: "Draft" as any,
+    priority: "Medium" as any,
+    confidentiality: "Internal",
+    description: "HIPAA compliant video consultation and digital prescription portal.",
+    estimatedPages: 14,
+    estimatedEffortHours: 180,
+    targetReleaseDate: "2025-08-30",
+    reviewDueDate: "2025-06-10",
+    nextReviewDate: "2025-06-20",
+    tags: ["Telehealth", "WebRTC"],
+    createdAt: "2025-03-01T10:00:00.000Z",
+    updatedAt: "2025-05-14T10:00:00.000Z",
+    createdBy: "Neha Patel",
+    updatedBy: "Neha Patel",
+  },
+  {
+    id: "BRD-24-004",
+    title: "HRMS & Payroll Integration BRD",
+    projectId: "PRJ-004",
+    projectName: "Internal Tools",
+    clientName: "Pehal Healthcare",
+    type: "Technical Requirement Document",
+    version: "v1.1",
+    status: "Pending Approval" as any,
+    priority: "Medium" as any,
+    confidentiality: "Restricted",
+    description: "Integration layer connecting employee attendance and project allocation.",
+    estimatedPages: 12,
+    estimatedEffortHours: 120,
+    targetReleaseDate: "2025-09-15",
+    reviewDueDate: "2025-06-15",
+    nextReviewDate: "2025-07-01",
+    tags: ["Integration", "Payroll", "HRMS"],
+    createdAt: "2025-03-20T12:00:00.000Z",
+    updatedAt: "2025-05-12T11:30:00.000Z",
+    createdBy: "Rahul Verma",
+    updatedBy: "Pooja Singh",
+  },
+];
+
 const activityItems = [
   {
     id: "a1",
@@ -242,15 +337,15 @@ export default function BrdRegistry() {
     void loadRecords();
   }, [loadRecords]);
 
-  const allItems = data?.items ?? [];
+  const allItems = data?.items && data.items.length > 0 ? data.items : DEMO_BRDS;
 
   const projectOptions = useMemo(
-    () => [...new Set(allItems.map((item) => item.projectName).filter(Boolean))],
+    () => [...new Set(allItems.map((item) => (typeof item.projectName === "string" ? item.projectName : "")).filter(Boolean))],
     [allItems],
   );
 
   const clientOptions = useMemo(
-    () => [...new Set(allItems.map((item) => item.clientName).filter(Boolean))],
+    () => [...new Set(allItems.map((item) => (typeof item.clientName === "string" ? item.clientName : "")).filter(Boolean))],
     [allItems],
   );
 
@@ -502,7 +597,7 @@ export default function BrdRegistry() {
           <span>Project</span>
           <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
             <option value="all">All Projects</option>
-            {projectOptions.map((option) => <option key={option}>{option}</option>)}
+            {projectOptions.map((option, idx) => <option key={`${option}-${idx}`}>{option}</option>)}
           </select>
         </label>
 
@@ -510,7 +605,7 @@ export default function BrdRegistry() {
           <span>Client</span>
           <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
             <option value="all">All Clients</option>
-            {clientOptions.map((option) => <option key={option}>{option}</option>)}
+            {clientOptions.map((option, idx) => <option key={`${option}-${idx}`}>{option}</option>)}
           </select>
         </label>
 
@@ -611,7 +706,7 @@ export default function BrdRegistry() {
                       onClick={() => setSelectedId(record.id)}
                     >
                       <td>
-                        <span className="brd-id-cell"><FileText size={14} />{record.id}</span>
+                        <span className="brd-id-cell"><FileText size={14} />{record.brdCode || record.code || record.id}</span>
                       </td>
                       <td className="brd-title-cell">
                         <button
@@ -711,7 +806,7 @@ export default function BrdRegistry() {
               <>
                 <div className="brd-detail-status"><BrdStatusBadge value={selected.status} /></div>
                 <h3>{selected.title}</h3>
-                <p className="brd-detail-id">{selected.id} <span>·</span> {selected.version || "v1.0"}</p>
+                <p className="brd-detail-id">{selected.brdCode || selected.code || selected.id} <span>·</span> {selected.version || "v1.0"}</p>
 
                 <div className="brd-detail-grid">
                   <div><span>Project</span><strong>{selected.projectName || "—"}</strong></div>

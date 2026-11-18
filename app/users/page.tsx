@@ -315,18 +315,43 @@ export default function UserRegistryPage() {
           </p>
         </div>
 
-        <button
-          className="rbac-primary-btn"
-          type="button"
-          onClick={() =>
-            window.location.assign(
-              "/users/new"
-            )
-          }
-        >
-          <Plus size={15} />
-          Add User
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button
+            type="button"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "8px 14px",
+              borderRadius: "6px",
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#334155",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+            onClick={() =>
+              window.location.assign(
+                "/users/roles"
+              )
+            }
+          >
+            <ShieldCheck size={16} />
+            Roles & RBAC
+          </button>
+          <button
+            className="rbac-primary-btn"
+            type="button"
+            onClick={() =>
+              window.location.assign(
+                "/users/new"
+              )
+            }
+          >
+            <Plus size={15} />
+            Add User
+          </button>
+        </div>
       </div>
 
       <div className="rbac-stats-grid">

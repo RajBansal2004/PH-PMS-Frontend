@@ -9,7 +9,7 @@ import {
   MapPin, UserRound, ShieldCheck, Globe, Plus, Loader2,
 } from "lucide-react";
 import "./client-workflow.css";
-import { createClient as apiCreateClient, employees } from "../../lib/api";
+import { createClient as apiCreateClient, employees, userRegistry } from "../../lib/api";
 
 type FormData = {
   clientType: string;
@@ -143,20 +143,35 @@ export default function CreateClientWizard() {
   const [employeeList, setEmployeeList] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
   const slaRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    employees()
-      .then((emps) => {
-        if (Array.isArray(emps)) {
-          setEmployeeList(emps);
-          if (emps.length > 0 && !data.accountManager) {
-            update("accountManager", emps[0].name || `${emps[0].firstName || ""} ${emps[0].lastName || ""}`.trim() || emps[0].email);
-          }
+    Promise.allSettled([employees(), userRegistry()]).then(([empRes, userRes]) => {
+      let list: any[] = [];
+      if (empRes.status === "fulfilled" && Array.isArray(empRes.value)) {
+        list = [...empRes.value];
+      }
+      if (userRes.status === "fulfilled" && (userRes.value as any)?.items) {
+        if (list.length === 0) {
+          list = (userRes.value as any).items.map((u: any) => ({
+            _id: u.id || u._id,
+            id: u.id || u._id,
+            name: u.name,
+            displayName: u.name,
+            email: u.email,
+          }));
         }
-      })
-      .catch((err) => console.warn("Failed to load employees for client wizard:", err));
+      }
+      if (list.length === 0) {
+        list = [{ id: "admin", _id: "admin", name: "PH PMS Admin", displayName: "PH PMS Admin" }];
+      }
+      setEmployeeList(list);
+      if (list.length > 0 && !data.accountManager) {
+        update("accountManager", list[0]._id || list[0].id || list[0].name);
+      }
+    }).catch((err) => console.warn("Failed to load staff for client wizard:", err));
   }, []);
 
   function update<K extends keyof FormData>(key: K, value: FormData[K]) {
@@ -219,6 +234,15 @@ export default function CreateClientWizard() {
     setSubmitting(true);
     setApiError("");
     try {
+      const selectedEmp = employeeList.find(
+        (e) => (e._id === data.accountManager) ||
+               (e.id === data.accountManager) ||
+               (e.displayName === data.accountManager) ||
+               (e.name === data.accountManager) ||
+               (`${e.firstName || ''} ${e.lastName || ''}`.trim() === data.accountManager) ||
+               (e.userId?.name === data.accountManager)
+      );
+
       const code = `CLT-${String(Date.now()).slice(-5)}`;
       const payload: any = {
         clientCode: code,
@@ -228,6 +252,8 @@ export default function CreateClientWizard() {
         website: data.website || null,
         email: data.email.trim() || null,
         phone: data.phone.trim() || null,
+        logo: logoBase64 || null,
+        accountManagerId: selectedEmp?._id || selectedEmp?.id || (data.accountManager?.match(/^[0-9a-fA-F]{24}$/) ? data.accountManager : undefined),
         billingModel: data.billingModel || "Time & Material",
         status: "ACTIVE",
         billingAddress: {
@@ -330,10 +356,41 @@ export default function CreateClientWizard() {
             <div className="cw-logo-upload">
               <label>Client Logo</label>
               <button type="button" className="cw-logo-drop" onClick={() => logoRef.current?.click()}>
-                {data.logo ? <span className="cw-uploaded-logo">{data.logo.name}</span> : <><UploadCloud size={27} /><b>Drag & drop logo here</b><span>or Browse</span><small>JPG, PNG up to 2MB</small></>}
+                {logoBase64 ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <img src={logoBase64} alt="Client Logo" style={{ maxHeight: 60, maxWidth: 140, objectFit: "contain", borderRadius: 6 }} />
+                    <span className="cw-uploaded-logo">{data.logo?.name || "Logo uploaded"}</span>
+                    <small style={{ color: "#2563eb", textDecoration: "underline" }}>Click to replace</small>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud size={27} />
+                    <b>Drag & drop logo here</b>
+                    <span>or Browse</span>
+                    <small>JPG, PNG up to 2MB</small>
+                  </>
+                )}
               </button>
-              <input ref={logoRef} type="file" accept="image/png,image/jpeg" hidden onChange={(e) => update("logo", e.target.files?.[0] ?? null)} />
-              <small>This logo will be used in client portal and documents.</small>
+              <input
+                ref={logoRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  update("logo", file);
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setLogoBase64(reader.result as string);
+                    };
+                    reader.readAsDataURL(file);
+                  } else {
+                    setLogoBase64(null);
+                  }
+                }}
+              />
+              <small>This logo will be displayed across client registry, overview, and reports.</small>
             </div>
             <div className="cw-fields-grid">
               <Field label="Client Type" required><select value={data.clientType} onChange={(e) => update("clientType", e.target.value)}><option>Enterprise</option><option>SME</option><option>SMB</option><option>Government</option><option>Startup</option></select></Field>
@@ -424,8 +481,28 @@ export default function CreateClientWizard() {
             <div className="cw-subpanel">
               <h3><UserRound size={15} /> Account Setup</h3>
               <div className="cw-fields-grid">
-                <Field label="Account Manager" required error={errors.accountManager}><select value={data.accountManager} onChange={(e) => update("accountManager", e.target.value)}><option>Rahul Verma</option><option>Neha Patel</option><option>Amit Kumar</option><option>Pooja Singh</option></select></Field>
-                <Field label="Secondary Account Manager"><select value={data.secondaryManager} onChange={(e) => update("secondaryManager", e.target.value)}><option>Neha Patel</option><option>Rahul Verma</option><option>Amit Kumar</option><option>Pooja Singh</option></select></Field>
+                <Field label="Account Manager" required error={errors.accountManager}>
+                  <select value={data.accountManager} onChange={(e) => update("accountManager", e.target.value)}>
+                    <option value="">Select Account Manager</option>
+                    {employeeList.map((emp) => {
+                      const name = emp.displayName || emp.name || emp.userId?.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || "Staff Member";
+                      const empId = emp._id || emp.id;
+                      const codeStr = emp.employeeCode ? ` (${emp.employeeCode})` : "";
+                      return <option key={empId} value={empId}>{name}{codeStr}</option>;
+                    })}
+                  </select>
+                </Field>
+                <Field label="Secondary Account Manager">
+                  <select value={data.secondaryManager} onChange={(e) => update("secondaryManager", e.target.value)}>
+                    <option value="">Select Secondary Manager</option>
+                    {employeeList.map((emp) => {
+                      const name = emp.displayName || emp.name || emp.userId?.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || "Staff Member";
+                      const empId = emp._id || emp.id;
+                      const codeStr = emp.employeeCode ? ` (${emp.employeeCode})` : "";
+                      return <option key={empId} value={empId}>{name}{codeStr}</option>;
+                    })}
+                  </select>
+                </Field>
                 <Field label="Default Project Template"><select value={data.projectTemplate} onChange={(e) => update("projectTemplate", e.target.value)}><option>Standard Project Template</option><option>Agile Project Template</option><option>Enterprise Delivery Template</option></select></Field>
                 <Field label="Default Task Status"><select value={data.defaultStatus} onChange={(e) => update("defaultStatus", e.target.value)}><option>Not Started</option><option>To Do</option><option>Backlog</option></select></Field>
                 <Field label="Default Project Category"><select value={data.projectCategory} onChange={(e) => update("projectCategory", e.target.value)}><option>Implementation</option><option>Development</option><option>Support</option><option>Consulting</option></select></Field>
@@ -450,7 +527,16 @@ export default function CreateClientWizard() {
           <div className="cw-review">
             <div className="cw-review-card">
               <div className="cw-review-heading"><h3><Building2 size={15} /> Basic Information</h3><button onClick={() => setStep(0)}>Edit</button></div>
-              <div className="cw-review-client"><span className="cw-review-logo">{data.logo ? data.logo.name.slice(0, 2).toUpperCase() : <Building2 />}</span><div><b>{data.displayName || "Client Display Name"}</b><small>{data.legalName || "Legal name not entered"}</small></div></div>
+              <div className="cw-review-client">
+                <span className="cw-review-logo" style={{ display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  {logoBase64 ? (
+                    <img src={logoBase64} alt="Client Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  ) : (
+                    <Building2 />
+                  )}
+                </span>
+                <div><b>{data.displayName || "Client Display Name"}</b><small>{data.legalName || "Legal name not entered"}</small></div>
+              </div>
               <ReviewRow label="Client Type" value={data.clientType} /><ReviewRow label="Industry" value={data.industry} /><ReviewRow label="Registration No." value={data.registrationNo || "-"} /><ReviewRow label="Website" value={data.website || "-"} /><ReviewRow label="Email" value={data.email} /><ReviewRow label="Phone" value={data.phone} />
             </div>
             <div className="cw-review-card">
@@ -467,7 +553,7 @@ export default function CreateClientWizard() {
             </div>
             <div className="cw-review-card">
               <div className="cw-review-heading"><h3><UserRound size={15} /> Account Setup</h3><button onClick={() => setStep(3)}>Edit</button></div>
-              <ReviewRow label="Account Manager" value={data.accountManager} /><ReviewRow label="Secondary Manager" value={data.secondaryManager} /><ReviewRow label="Client Portal" value={data.portalEnabled ? "Enabled" : "Disabled"} /><ReviewRow label="Access Level" value={data.accessLevel} /><ReviewRow label="Project Template" value={data.projectTemplate} /><ReviewRow label="Default Status" value={data.defaultStatus} />
+              <ReviewRow label="Account Manager" value={employeeList.find((e) => (e._id === data.accountManager || e.id === data.accountManager))?.userId?.name || data.accountManager} /><ReviewRow label="Secondary Manager" value={data.secondaryManager} /><ReviewRow label="Client Portal" value={data.portalEnabled ? "Enabled" : "Disabled"} /><ReviewRow label="Access Level" value={data.accessLevel} /><ReviewRow label="Project Template" value={data.projectTemplate} /><ReviewRow label="Default Status" value={data.defaultStatus} />
             </div>
           </div>
         )}

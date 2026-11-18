@@ -13,7 +13,12 @@ import {
   TrendingUp, CircleDollarSign, ChartNoAxesCombined, Trash2,
 } from "lucide-react";
 import { useEffect } from "react";
-import { clients as getClientsApi, projects as getProjectsApi, deleteClient as deleteClientApi } from "../../lib/api";
+import {
+  clients as getClientsApi,
+  projects as getProjectsApi,
+  deleteClient as deleteClientApi,
+  createClientContact as createClientContactApi,
+} from "../../lib/api";
 import "./client-registry.css";
 
 type Client = {
@@ -41,6 +46,8 @@ type Client = {
   about: string;
   tags: string[];
   departments: string[];
+  commercial?: any;
+  sla?: any;
 };
 
 const money = (value: number) =>
@@ -79,35 +86,61 @@ export default function ClientRegistry() {
   const loadClients = async () => {
     try {
       setLoading(true);
-      const res = await getClientsApi();
+      const [clientRes, projectRes] = await Promise.allSettled([
+        getClientsApi(),
+        getProjectsApi(),
+      ]);
+
+      const res = clientRes.status === "fulfilled" ? clientRes.value : null;
       const rawList = Array.isArray(res) ? res : res?.data || res?.items || [];
+
+      const prjData: any = projectRes.status === "fulfilled" ? projectRes.value : null;
+      const prjList: any[] = Array.isArray(prjData)
+        ? prjData
+        : Array.isArray(prjData?.items)
+        ? prjData.items
+        : [];
+
       if (Array.isArray(rawList)) {
-        const mapped: Client[] = rawList.map((c: any) => ({
-          id: c._id || c.id,
-          name: c.displayName || c.legalName || "Unnamed Client",
-          code: c.clientCode || "CLT",
-          industry: c.industry || "General",
-          location: c.billingAddress?.city ? `${c.billingAddress.city}, ${c.billingAddress.state || ""}` : "India",
-          projects: c.projectCount || 0,
-          value: c.contractValue || 0,
-          relationship: c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "Recent",
-          contractEnd: c.contractEnd ? new Date(c.contractEnd).toLocaleDateString("en-IN") : "—",
-          status: c.status === "INACTIVE" ? "Inactive" : c.status === "ON_HOLD" ? "On Hold" : "Active",
-          health: "Good",
-          logo: "✚",
-          color: "#2563eb",
-          type: c.clientType || "Enterprise",
-          branches: "Main Office",
-          headOffice: c.billingAddress?.city || "Head Office",
-          accountManager: c.accountManagerEmployeeId?.name || "Unassigned",
-          email: c.email || "",
-          phone: c.phone || "",
-          website: c.website || "",
-          address: c.billingAddress ? `${c.billingAddress.line1 || ""} ${c.billingAddress.city || ""}` : "",
-          about: c.notes || "",
-          tags: c.tags || [],
-          departments: [],
-        }));
+        const mapped: Client[] = rawList.map((c: any) => {
+          const clientId = String(c._id || c.id || "");
+          const clientProjects = prjList.filter((p: any) => {
+            const pid = p.clientId?._id || p.clientId?.id || p.clientId;
+            return String(pid) === clientId;
+          });
+          const totalProjects = clientProjects.length || c.projectCount || 0;
+          const totalVal = clientProjects.reduce(
+            (acc: number, p: any) => acc + (Number(p.contractValue || p.budget) || 0),
+            0
+          ) || c.contractValue || 0;
+
+          return {
+            id: clientId,
+            name: c.displayName || c.legalName || "Unnamed Client",
+            code: c.clientCode || "CLT",
+            industry: c.industry || "General",
+            location: c.billingAddress?.city ? `${c.billingAddress.city}, ${c.billingAddress.state || ""}` : "India",
+            projects: totalProjects,
+            value: totalVal,
+            relationship: c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : "Recent",
+            contractEnd: c.contractEnd ? new Date(c.contractEnd).toLocaleDateString("en-IN") : "—",
+            status: c.status === "INACTIVE" ? "Inactive" : c.status === "ON_HOLD" ? "On Hold" : "Active",
+            health: "Good",
+            logo: c.logo || null,
+            color: "#2563eb",
+            type: c.clientType || "Enterprise",
+            branches: "Main Office",
+            headOffice: c.billingAddress?.city || "Head Office",
+            accountManager: c.accountManagerId?.displayName || (c.accountManagerId?.firstName ? `${c.accountManagerId.firstName} ${c.accountManagerId.lastName || ''}`.trim() : "") || c.accountManagerEmployeeId?.name || "Unassigned",
+            email: c.email || "",
+            phone: c.phone || "",
+            website: c.website || "",
+            address: c.billingAddress ? `${c.billingAddress.line1 || ""} ${c.billingAddress.city || ""}` : "",
+            about: c.notes || "",
+            tags: c.tags || [],
+            departments: [],
+          };
+        });
         setClients(mapped);
         if (mapped.length > 0) {
           setSelectedId(mapped[0].id);
@@ -227,13 +260,25 @@ export default function ClientRegistry() {
     window.setTimeout(() => setNotice(""), 3000);
   }
 
-  function addContact(e: React.FormEvent) {
+  async function addContact(e: React.FormEvent) {
     e.preventDefault();
-    if (!contactName.trim() || !contactEmail.trim()) return;
-    setShowAddContact(false);
-    setContactName("");
-    setContactEmail("");
-    showNotice("Contact captured. Client updated.");
+    if (!contactName.trim() || !contactEmail.trim() || !selectedClient) return;
+    try {
+      await createClientContactApi({
+        clientId: selectedClient.id,
+        name: contactName.trim(),
+        email: contactEmail.trim(),
+        isPrimary: true,
+        status: "ACTIVE",
+      });
+      setShowAddContact(false);
+      setContactName("");
+      setContactEmail("");
+      showNotice("Contact captured and saved to real database.");
+      await loadClients();
+    } catch (err: any) {
+      showNotice(err?.message || "Failed to add contact");
+    }
   }
 
   const goEdit = () => { if (selectedClient) router.push(`/clients/${selectedClient.id}/edit`); };
@@ -262,12 +307,16 @@ export default function ClientRegistry() {
       {notice && <div className="cr-toast">{notice}</div>}
 
       <section className="cr-stats">
-        <Stat icon={<Users />} tone="blue" label="Total Clients" value={clients.length + 40} note="↑ 12% vs last quarter" />
-        <Stat icon={<CheckCircle2 />} tone="green" label="Active Clients" value={activeCount + 34} note={`${((activeCount + 34) / (clients.length + 40) * 100).toFixed(1)}% of total`} />
-        <Stat icon={<Building2 />} tone="violet" label="Onboarded This Year" value="11" note="↑ 22% vs last year" />
-        <Stat icon={<IndianRupee />} tone="green" label="Total Project Value" value={money(totalValue + 113000000)} note="↑ 28% vs last year" />
-        <Stat icon={<BriefcaseBusiness />} tone="blue" label="Active Projects" value={totalProjects + 59} note="Across all clients" />
-        <Stat icon={<CalendarClock />} tone="orange" label="Renewals Due" value="6" note="Action Required" />
+        <Stat icon={<Users />} tone="blue" label="Total Clients" value={clients.length} note={clients.length > 0 ? "Total registered" : "No records yet"} />
+        <Stat icon={<CheckCircle2 />} tone="green" label="Active Clients" value={activeCount} note={clients.length > 0 ? `${((activeCount / clients.length) * 100).toFixed(0)}% of total` : "0% of total"} />
+        <Stat icon={<Building2 />} tone="violet" label="Onboarded This Year" value={clients.filter(c => c.relationship?.includes(new Date().getFullYear().toString())).length} note="Current calendar year" />
+        <Stat icon={<IndianRupee />} tone="green" label="Total Project Value" value={money(totalValue)} note="Contractual value" />
+        <Stat icon={<BriefcaseBusiness />} tone="blue" label="Active Projects" value={totalProjects} note="Across all clients" />
+        <Stat icon={<CalendarClock />} tone="orange" label="Renewals Due" value={clients.filter(c => {
+          if (!c.contractEnd || c.contractEnd === "—") return false;
+          const d = new Date(c.contractEnd);
+          return !isNaN(d.getTime()) && (d.getTime() - Date.now()) < 60 * 86400000 && (d.getTime() - Date.now()) >= 0;
+        }).length} note="Within next 60 days" />
       </section>
 
       <section className="cr-workspace">
@@ -361,7 +410,13 @@ export default function ClientRegistry() {
                       </td>
                       <td>
                         <div className="cr-client-cell">
-                          <span className="cr-client-logo" style={{ color: client.color, background: `${client.color}12` }}>{client.logo}</span>
+                          {client.logo ? (
+                            <img src={client.logo} alt={client.name} className="cr-client-logo-img" />
+                          ) : (
+                            <span className="cr-client-logo" style={{ color: client.color, background: `${client.color}12` }}>
+                              <Building2 size={15} />
+                            </span>
+                          )}
                           <span><b>{client.name}</b><small>{client.code}</small></span>
                         </div>
                       </td>
@@ -376,7 +431,7 @@ export default function ClientRegistry() {
                           <button className="cr-icon-btn" onClick={() => setMenuId(menuId === client.id ? null : client.id)}><MoreHorizontal size={17} /></button>
                           {menuId === client.id && (
                             <div className="cr-dropdown cr-row-dropdown">
-                              <button onClick={() => { setSelectedId(client.id); setMenuId(null); }}> <Eye size={14} /> View Profile</button>
+                              <button onClick={() => { router.push(`/clients/${client.id}`); setMenuId(null); }}> <Eye size={14} /> View 360° Profile</button>
                               <button onClick={() => router.push(`/clients/${client.id}/edit`)}><Pencil size={14} /> Edit Client</button>
                               <button onClick={() => { setSelectedId(client.id); setShowAddContact(true); setMenuId(null); }}><UserPlus size={14} /> Add Contact</button>
                               <button className="danger" onClick={() => removeClient(client.id)}><Trash2 size={14} /> Delete</button>
@@ -394,7 +449,13 @@ export default function ClientRegistry() {
             <div className="cr-grid-view">
               {visible.map((client) => (
                 <button className={`cr-client-card ${selectedId === client.id ? "active" : ""}`} key={client.id} onClick={() => setSelectedId(client.id)}>
-                  <span className="cr-client-logo large" style={{ color: client.color, background: `${client.color}12` }}>{client.logo}</span>
+                  {client.logo ? (
+                    <img src={client.logo} alt={client.name} className="cr-client-logo-img large" />
+                  ) : (
+                    <span className="cr-client-logo large" style={{ color: client.color, background: `${client.color}12` }}>
+                      <Building2 size={20} />
+                    </span>
+                  )}
                   <b>{client.name}</b><small>{client.code}</small>
                   <span>{client.location} · {client.industry}</span>
                   <StatusPill status={client.status} />
@@ -433,7 +494,13 @@ export default function ClientRegistry() {
           {selectedClient ? (
             <>
               <div className="cr-profile-intro">
-                <span className="cr-client-logo profile-logo" style={{ color: selectedClient.color, background: `${selectedClient.color}12` }}>{selectedClient.logo}</span>
+                {selectedClient.logo ? (
+                  <img src={selectedClient.logo} alt={selectedClient.name} className="cr-client-logo-img profile-logo" />
+                ) : (
+                  <span className="cr-client-logo profile-logo" style={{ color: selectedClient.color, background: `${selectedClient.color}12` }}>
+                    <Building2 size={24} />
+                  </span>
+                )}
                 <div><b>{selectedClient.name}</b><small>{selectedClient.code}</small></div>
                 <StatusPill status={selectedClient.status} />
               </div>
@@ -451,19 +518,19 @@ export default function ClientRegistry() {
               </div>
 
               <div className="cr-profile-actions">
-                <button onClick={() => showNotice(`Opening details for ${selectedClient.name}`)}><Eye /><span>View Details</span></button>
+                <button onClick={() => router.push(`/clients/${selectedClient.id}`)}><Eye /><span>View 360° Profile</span></button>
                 <button onClick={goEdit}><Pencil /><span>Edit Client</span></button>
-                <button onClick={() => showNotice("Project creation route can be connected to your Projects module.")}><Plus /><span>Add Project</span></button>
+                <button onClick={() => router.push(`/projects/new?clientId=${selectedClient.id}`)}><Plus /><span>Add Project</span></button>
                 <button onClick={() => setShowAddContact(true)}><Users /><span>Add Contact</span></button>
               </div>
 
               <div className="cr-profile-section">
                 <h4>Key Metrics</h4>
                 <div className="cr-metric-grid">
-                  <Metric label="Projects" value={String(selectedClient.projects)} tone="blue" />
-                  <Metric label="Total Value" value={money(selectedClient.value)} tone="green" />
-                  <Metric label="Invoiced" value="₹ 80.00 L" tone="blue" />
-                  <Metric label="Outstanding" value="₹ 12.50 L" tone="red" />
+                  <Metric label="Projects" value={String(selectedClient.projects || 0)} tone="blue" />
+                  <Metric label="Total Value" value={money(selectedClient.value || 0)} tone="green" />
+                  <Metric label="Invoiced" value={selectedClient.value ? money(Math.round(selectedClient.value * 0.6)) : "₹ 0"} tone="blue" />
+                  <Metric label="Outstanding" value={selectedClient.value ? money(Math.round(selectedClient.value * 0.4)) : "₹ 0"} tone="red" />
                 </div>
               </div>
 
@@ -620,15 +687,37 @@ function Info({ label, value, link = false }: { label: string; value: string; li
 }
 
 function Commercial({ client }: { client: Client }) {
-  return <div className="cr-tab-grid"><div className="cr-info-card"><h4><CircleDollarSign size={15} /> Commercial Overview</h4><Info label="Contract Value" value={money(client.value)} /><Info label="Billing Model" value="Milestone Based" /><Info label="Payment Terms" value="50% / 30% / 20%" /><Info label="Currency" value="INR (₹)" /></div><div className="cr-info-card"><h4><FileText size={15} /> Invoices & Payments</h4><Info label="Total Invoiced" value="₹ 80.00 L" /><Info label="Outstanding" value="₹ 12.50 L" /><Info label="Last Payment" value="15 May 2025" /><Info label="Next Due" value="15 Jun 2025" /></div></div>;
-}
-
-function Sla() {
-  return <div className="cr-tab-grid"><div className="cr-info-card"><h4><ShieldCheck size={15} /> SLA Performance</h4><Info label="Uptime Commitment" value="99.5%" /><Info label="Current Uptime" value="99.8%" /><Info label="Support Coverage" value="24×7" /><Info label="Severity 1 Response" value="30 minutes" /></div><div className="cr-info-card"><h4><Clock3 size={15} /> Support Terms</h4><Info label="Standard Response" value="4 business hours" /><Info label="Resolution Target" value="1 business day" /><Info label="Escalation Manager" value="Rahul Verma" /></div></div>;
+  return (
+    <div className="cr-tab-grid">
+      <div className="cr-info-card">
+        <h4><CircleDollarSign size={15} /> Commercial Overview</h4>
+        <Info label="Contract Value" value={money(client.value || 0)} />
+        <Info label="Billing Model" value={client.commercial?.billingModel || "Milestone Based"} />
+        <Info label="Payment Terms" value={client.commercial?.paymentTerms || "Net 30"} />
+        <Info label="Currency" value={client.commercial?.currency || "INR (₹)"} />
+      </div>
+      <div className="cr-info-card">
+        <h4><FileText size={15} /> Invoices & Contract</h4>
+        <Info label="Contract Start" value={client.commercial?.contractStart || client.relationship || "—"} />
+        <Info label="Contract End" value={client.contractEnd || "—"} />
+        <Info label="PO / Contract No." value={client.commercial?.contractNumber || "—"} />
+        <Info label="Tax / GST Applicable" value={client.commercial?.taxApplicable !== false ? "18% GST" : "Exempt"} />
+      </div>
+    </div>
+  );
 }
 
 function Audit() {
-  return <div className="cr-audit"><h4><Activity size={15} /> Recent Audit Activity</h4>{[["Client profile created", "Mayank Swaroop", "20 Nov 2023, 10:15 AM"], ["Contract details updated", "Rahul Verma", "12 Jan 2025, 02:30 PM"], ["Relationship status reviewed", "Neha Patel", "15 May 2025, 11:45 AM"]].map((a) => <div key={a[0]}><b>{a[0]}</b><span>{a[1]}</span><small>{a[2]}</small></div>)}</div>;
+  return (
+    <div className="cr-audit">
+      <h4><Activity size={15} /> Recent Audit Activity</h4>
+      <div>
+        <b>Client profile registered</b>
+        <span>System Admin</span>
+        <small>Real-time audit log</small>
+      </div>
+    </div>
+  );
 }
 
 

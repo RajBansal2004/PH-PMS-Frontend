@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertCircle,
@@ -35,12 +36,11 @@ import {
   tasks as getTasks,
   createTask as apiCreateTask,
   updateTask as apiUpdateTask,
-  employees as getEmployees,
-  sprints as getSprints,
-  updateSprint as apiUpdateSprint,
   getBugs,
+  createBug as apiCreateBug,
   getOrganizationAudit,
 } from "@/lib/api";
+import { sprintApi, isValidObjectId, type Sprint } from "@/lib/sprints/api";
 import "./active-sprint.css";
 
 type Task = {
@@ -74,12 +74,17 @@ type TeamMember = {
 };
 
 const columnDefs = [
-  { id: "todo", title: "To Do", color: "gray", matchStatuses: ["TODO", "To Do", "Open", "Draft"] },
-  { id: "progress", title: "In Progress", color: "blue", matchStatuses: ["IN_PROGRESS", "In Progress", "Progress"] },
-  { id: "review", title: "In Review", color: "orange", matchStatuses: ["IN_REVIEW", "In Review", "Review"] },
-  { id: "testing", title: "Testing", color: "purple", matchStatuses: ["TESTING", "Testing", "QA"] },
-  { id: "done", title: "Done", color: "green", matchStatuses: ["DONE", "Done", "Completed", "COMPLETED"] },
+  { id: "todo", title: "To Do", backendStatus: "TO_DO", color: "gray", matchStatuses: ["TO_DO", "TODO", "BACKLOG", "SELECTED", "To Do", "Open", "Draft", "REOPENED", "BLOCKED", "ON_HOLD"] },
+  { id: "progress", title: "In Progress", backendStatus: "IN_PROGRESS", color: "blue", matchStatuses: ["IN_PROGRESS", "In Progress", "Progress"] },
+  { id: "review", title: "In Review", backendStatus: "CODE_REVIEW", color: "orange", matchStatuses: ["CODE_REVIEW", "IN_REVIEW", "In Review", "Review"] },
+  { id: "testing", title: "Testing", backendStatus: "QA", color: "purple", matchStatuses: ["QA", "UAT", "TESTING", "Testing"] },
+  { id: "done", title: "Done", backendStatus: "DONE", color: "green", matchStatuses: ["DONE", "Done", "Completed", "COMPLETED"] },
 ];
+
+const formatTaskStatus = (raw: string) => {
+  const col = columnDefs.find((c) => c.matchStatuses.some((s) => s.toLowerCase() === (raw || "").toLowerCase()));
+  return col ? col.title : raw || "To Do";
+};
 
 const tabs = ["Overview", "Backlog", "Kanban Board", "Burndown Chart", "Task List", "Issues", "Files", "Logs"];
 
@@ -176,8 +181,10 @@ function BurndownChart({ totalPoints, completedPoints }: { totalPoints: number; 
 }
 
 export default function ActiveSprint({ sprintId }: { sprintId: string }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("Overview");
-  const [sprint, setSprint] = useState<any>(null);
+  const [sprint, setSprint] = useState<Sprint | null>(null);
+  const [allSprints, setAllSprints] = useState<Sprint[]>([]);
   const [tasksList, setTasksList] = useState<Task[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -220,104 +227,98 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
   const loadSprintData = async () => {
     try {
       setLoading(true);
-      const [sRes, tRes, eRes, bRes, aRes] = await Promise.allSettled([
-        getSprints(),
-        getTasks(),
-        getEmployees(),
-        getBugs().catch(() => ({ data: [] })),
-        getOrganizationAudit({ limit: 15 }).catch(() => ({ data: [] })),
+      const [{ sprint: targetSprint, allSprints: sprintOptions }, pRes, aRes] = await Promise.all([
+        sprintApi.resolve(sprintId, ["ACTIVE", "PLANNED", "COMPLETED"]),
+        sprintApi.getPersonnel().catch(() => []),
+        getOrganizationAudit({ limit: 15 }).catch(() => ({ items: [] })),
       ]);
 
-      let targetSprint: any = null;
-      if (sRes.status === "fulfilled") {
-        const rawList = Array.isArray(sRes.value) ? sRes.value : sRes.value?.data || sRes.value?.items || [];
-        targetSprint = rawList.find(
-          (s: any) =>
-            s._id === sprintId ||
-            s.id === sprintId ||
-            (s.sprintCode && s.sprintCode.toLowerCase() === sprintId.toLowerCase()) ||
-            (s.code && s.code.toLowerCase() === sprintId.toLowerCase())
-        ) || rawList[0] || null;
+      setAllSprints(sprintOptions);
+      setSprint(targetSprint);
+      if (targetSprint) {
+        setGoal(targetSprint.goal || targetSprint.description || "");
+      }
 
-        if (targetSprint) {
-          setSprint(targetSprint);
-          setGoal(targetSprint.goal || targetSprint.description || "");
+      // Real Personnel (Users + Employees)
+      const members: TeamMember[] = (pRes || []).map((person) => ({
+        id: person.id,
+        name: person.name,
+        role: person.email || "Team Member",
+        initials: getInitials(person.name),
+        tasksCount: 0,
+        utilization: 0,
+      }));
+      setTeamMembers(members);
+      if (members.length > 0 && !taskAssignee) {
+        setTaskAssignee(members[0].name);
+        setIssueAssignee(members[0].name);
+      }
+
+      // Fetch sprint-scoped tasks and project-scoped bugs directly from backend
+      if (targetSprint?._id) {
+        const projectKey =
+          typeof targetSprint.projectId === "object"
+            ? targetSprint.projectId?._id
+            : targetSprint.projectId;
+
+        const [tRes, bRes] = await Promise.allSettled([
+          getTasks({ sprintId: targetSprint._id, limit: 100 }),
+          getBugs(projectKey && isValidObjectId(projectKey) ? { projectId: projectKey, limit: 100 } : { limit: 100 }).catch(() => ({ items: [] })),
+        ]);
+
+        if (tRes.status === "fulfilled") {
+          const rawTasks = Array.isArray(tRes.value) ? tRes.value : (tRes.value as any)?.data || (tRes.value as any)?.items || [];
+          const mapped: Task[] = rawTasks.map((t: any) => {
+            const assigneeName = t.assigneeId?.name || t.assignee?.name || t.assigneeName || "Unassigned";
+            return {
+              id: t.taskId || t.code || `TSK-${String(t._id || t.id).slice(-4).toUpperCase()}`,
+              backendId: t._id || t.id,
+              title: t.title || "Untitled Task",
+              label: t.type || "Task",
+              assignee: assigneeName,
+              assigneeId: t.assigneeId?._id || t.assigneeId,
+              initials: getInitials(assigneeName),
+              points: Number(t.storyPoints || (t.estimatedHours ? Math.max(1, Math.round(t.estimatedHours / 4)) : 3)),
+              progress: ["completed", "done"].includes(String(t.status || "").toLowerCase()) ? 100 : t.progress || 0,
+              status: t.status || "TO_DO",
+            };
+          });
+          setTasksList(mapped);
         }
-      }
 
-      // Employees
-      let members: TeamMember[] = [];
-      if (eRes.status === "fulfilled") {
-        const rawEmployees = Array.isArray(eRes.value) ? eRes.value : eRes.value?.data || eRes.value?.items || [];
-        members = rawEmployees.map((emp: any) => {
-          const empName = emp.name || emp.fullName || [emp.firstName, emp.lastName].filter(Boolean).join(" ") || "Employee";
-          return {
-            id: emp._id || emp.id,
-            name: empName,
-            role: emp.designation?.name || emp.designation || emp.role || "Team Member",
-            initials: getInitials(empName),
-            tasksCount: 0,
-            utilization: 0,
-          };
-        });
-        setTeamMembers(members);
-        if (members.length > 0 && !taskAssignee) {
-          setTaskAssignee(members[0].name);
-          setIssueAssignee(members[0].name);
+        if (bRes.status === "fulfilled") {
+          const rawBugs: any = bRes.value;
+          const rawBugsList = Array.isArray(rawBugs) ? rawBugs : rawBugs?.items || rawBugs?.data || [];
+          const mappedIssues: Issue[] = rawBugsList.map((b: any) => ({
+            id: b.bugId || b.code || `ISS-${String(b._id || b.id).slice(-3).toUpperCase()}`,
+            title: b.title || "Issue",
+            priority: (["HIGH", "CRITICAL", "URGENT"].includes(String(b.priority || "").toUpperCase())
+              ? "High"
+              : String(b.priority || "").toUpperCase() === "LOW"
+              ? "Low"
+              : "Medium") as "High" | "Medium" | "Low",
+            status: (["RESOLVED", "CLOSED", "FIXED"].includes(String(b.status || "").toUpperCase())
+              ? "Resolved"
+              : String(b.status || "").toUpperCase() === "IN_PROGRESS" || String(b.status || "").toUpperCase() === "IN PROGRESS"
+              ? "In Progress"
+              : "Open") as "Open" | "In Progress" | "Resolved",
+            assignee: b.assigneeId?.name || b.assignedTo?.name || b.assignee?.name || "Unassigned",
+          }));
+          setIssues(mappedIssues);
         }
-      }
-
-      // Tasks
-      if (tRes.status === "fulfilled") {
-        const rawTasks = Array.isArray(tRes.value) ? tRes.value : tRes.value?.data || tRes.value?.items || [];
-        const sprintKey = targetSprint?._id || sprintId;
-        const filteredTasks = rawTasks.filter((t: any) => {
-          if (!targetSprint) return true;
-          return t.sprintId === sprintKey || t.sprintId?._id === sprintKey || t.sprint === sprintKey;
-        });
-
-        const mapped: Task[] = (filteredTasks.length > 0 ? filteredTasks : rawTasks.slice(0, 15)).map((t: any) => {
-          const assigneeName = t.assigneeId?.name || t.assignee?.name || t.assigneeName || "Unassigned";
-          return {
-            id: t.taskId || t.code || `TSK-${String(t._id || t.id).slice(-4).toUpperCase()}`,
-            backendId: t._id || t.id,
-            title: t.title || "Untitled Task",
-            label: t.type || "Feature",
-            assignee: assigneeName,
-            assigneeId: t.assigneeId?._id || t.assigneeId,
-            initials: getInitials(assigneeName),
-            points: Number(t.estimatedHours ? Math.round(t.estimatedHours / 4) : t.storyPoints || 3),
-            progress: t.status === "Completed" || t.status === "Done" || t.status === "COMPLETED" ? 100 : t.progress || 0,
-            status: t.status || "Open",
-          };
-        });
-        setTasksList(mapped);
-      }
-
-      // Bugs / Issues
-      if (bRes.status === "fulfilled") {
-        const rawBugs: any = bRes.value;
-        const rawBugsList = Array.isArray(rawBugs) ? rawBugs : rawBugs?.data || rawBugs?.items || [];
-        const mappedIssues: Issue[] = rawBugsList.map((b: any) => ({
-          id: b.bugId || b.code || `ISS-${String(b._id || b.id).slice(-3).toUpperCase()}`,
-          title: b.title || "Issue",
-          priority: (b.priority === "High" || b.priority === "Critical" ? "High" : b.priority === "Low" ? "Low" : "Medium") as "High" | "Medium" | "Low",
-          status: (b.status === "Resolved" || b.status === "Closed" ? "Resolved" : b.status === "In Progress" ? "In Progress" : "Open") as "Open" | "In Progress" | "Resolved",
-          assignee: b.assigneeId?.name || b.assignee?.name || "Unassigned",
-        }));
-        setIssues(mappedIssues);
+      } else {
+        setTasksList([]);
+        setIssues([]);
       }
 
       // Audit logs
-      if (aRes.status === "fulfilled") {
-        const rawAudit: any = aRes.value;
-        const mappedAudit = (Array.isArray(rawAudit) ? rawAudit : rawAudit?.data || rawAudit?.items || []).map((item: any) => ({
-          date: item.createdAt ? new Date(item.createdAt).toLocaleDateString("en-IN", { month: "short", day: "numeric" }) : "Today",
-          text: `${item.performedByName || item.userName || "System"} ${item.action || "performed action"} on ${item.entityName || item.entityType || "Sprint"}`,
-          color: item.action?.toLowerCase().includes("delete") ? "red" : "blue",
-        }));
-        setActivityItems(mappedAudit);
-      }
+      const rawAudit: any = aRes;
+      const mappedAudit = (Array.isArray(rawAudit) ? rawAudit : rawAudit?.items || rawAudit?.data || []).map((item: any) => ({
+        date: item.createdAt ? new Date(item.createdAt).toLocaleDateString("en-IN", { month: "short", day: "numeric" }) : "Today",
+        text: `${item.performedByName || item.userName || "System"} ${item.action || "performed action"} on ${item.entityName || item.entityType || "Sprint"}`,
+        color: item.action?.toLowerCase().includes("delete") ? "red" : "blue",
+      }));
+      setActivityItems(mappedAudit);
     } catch (err: any) {
       notify(`Failed to fetch sprint details: ${err?.message || "Server error"}`);
     } finally {
@@ -351,77 +352,115 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
     return doneCol ? doneCol.tasks.reduce((acc, t) => acc + (t.points || 0), 0) : 0;
   }, [columns]);
 
+  const syncSprintMetrics = async (nextTasks: Task[]) => {
+    if (!sprint?._id) return;
+    const totalSp = nextTasks.reduce((sum, t) => sum + (t.points || 0), 0);
+    const doneSp = nextTasks
+      .filter((t) => ["done", "completed"].includes((t.status || "").toLowerCase()))
+      .reduce((sum, t) => sum + (t.points || 0), 0);
+    const pct = totalSp > 0 ? Math.round((doneSp / totalSp) * 100) : 0;
+    try {
+      await sprintApi.update(sprint._id, {
+        plannedStoryPoints: totalSp,
+        completedStoryPoints: doneSp,
+        progress: pct,
+      });
+    } catch {
+      // non-blocking metrics sync
+    }
+  };
+
   const addTask = async () => {
     if (!taskTitle.trim()) {
       notify("Please enter a task title.");
       return;
     }
+    if (!sprint?._id) {
+      notify("Create or select a sprint first before adding tasks.");
+      return;
+    }
     const member = teamMembers.find((p) => p.name === taskAssignee);
-    const targetStatus = taskColumn === "done" ? "Completed" : taskColumn === "progress" ? "In Progress" : taskColumn === "review" ? "In Review" : "Open";
+    const colDef = columnDefs.find((c) => c.id === taskColumn) || columnDefs[0];
+    const targetStatus = colDef.backendStatus;
+
+    const projId = typeof sprint.projectId === "object" ? sprint.projectId?._id : sprint.projectId;
+    const msId = typeof sprint.milestoneId === "object" ? sprint.milestoneId?._id : sprint.milestoneId;
 
     try {
-      const payload = {
+      const payload: Record<string, any> = {
         title: taskTitle.trim(),
         description: taskTitle.trim(),
-        priority: "Medium",
+        priority: "MEDIUM",
         status: targetStatus,
-        projectId: sprint?.projectId?._id || sprint?.projectId,
-        milestoneId: sprint?.milestoneId?._id || sprint?.milestoneId,
-        sprintId: sprint?._id || sprintId,
-        assigneeId: member?.id,
+        projectId: projId,
+        sprintId: sprint._id,
         estimatedHours: (Number(taskPoints) || 3) * 4,
       };
+      if (isValidObjectId(msId)) payload.milestoneId = msId;
+      if (isValidObjectId(member?.id)) payload.assigneeId = member!.id;
+      if (sprint.endDate) payload.dueDate = new Date(`${sprint.endDate}T00:00:00`).toISOString();
+
       const created = await apiCreateTask(payload);
       const newTask: Task = {
-        id: created?.taskId || `TSK-${Math.floor(100 + Math.random() * 900)}`,
+        id: created?.taskId || `TSK-${String(created?._id || Date.now()).slice(-4).toUpperCase()}`,
         backendId: created?._id || created?.id,
         title: taskTitle.trim(),
-        label: "Feature",
+        label: created?.type || "Task",
         assignee: taskAssignee || "Unassigned",
         initials: getInitials(taskAssignee),
         points: Number(taskPoints) || 3,
-        progress: targetStatus === "Completed" ? 100 : 0,
+        progress: targetStatus === "DONE" ? 100 : 0,
         status: targetStatus,
       };
-      setTasksList((prev) => [...prev, newTask]);
+      const updated = [...tasksList, newTask];
+      setTasksList(updated);
       setTaskTitle("");
       setShowTaskForm(false);
       notify("Task created and saved to sprint.");
+      syncSprintMetrics(updated);
     } catch (err: any) {
       notify(`Error creating task: ${err?.message || "Check fields and try again."}`);
     }
   };
 
-  const addIssue = () => {
+  const addIssue = async () => {
     if (!issueTitle.trim()) {
       notify("Please enter an issue title.");
       return;
     }
-    setIssues((current) => [
-      ...current,
-      {
-        id: `ISS-${String(10 + current.length + 1).padStart(3, "0")}`,
-        title: issueTitle.trim(),
-        priority: "Medium",
-        status: "Open",
-        assignee: issueAssignee || "Unassigned",
-      },
-    ]);
-    setIssueTitle("");
-    setShowIssueForm(false);
-    notify("Issue recorded.");
+    const projId = typeof sprint?.projectId === "object" ? sprint?.projectId?._id : sprint?.projectId;
+    const member = teamMembers.find((p) => p.name === issueAssignee);
+    try {
+      let created: any = null;
+      if (isValidObjectId(projId)) {
+        created = await apiCreateBug({
+          projectId: projId,
+          title: issueTitle.trim(),
+          description: `Logged in active sprint ${sprint?.sprintCode || sprintId}`,
+          priority: "MEDIUM",
+          severity: "MEDIUM",
+          ...(isValidObjectId(member?.id) ? { assignedTo: member!.id } : {}),
+        });
+      }
+      setIssues((current) => [
+        ...current,
+        {
+          id: created?.bugId || created?.code || `ISS-${String(current.length + 1).padStart(3, "0")}`,
+          title: issueTitle.trim(),
+          priority: "Medium",
+          status: "Open",
+          assignee: issueAssignee || "Unassigned",
+        },
+      ]);
+      setIssueTitle("");
+      setShowIssueForm(false);
+      notify("Issue recorded and persisted.");
+    } catch (err: any) {
+      notify(`Could not create issue: ${err?.message || "API error"}`);
+    }
   };
 
   const moveTask = async (taskId: string, direction: "next" | "previous") => {
-    const colOrder = ["todo", "progress", "review", "testing", "done"];
-    const statusMap: Record<string, string> = {
-      todo: "Open",
-      progress: "In Progress",
-      review: "In Review",
-      testing: "Testing",
-      done: "Completed",
-    };
-
     const task = tasksList.find((t) => t.id === taskId);
     if (!task) return;
 
@@ -429,19 +468,21 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
     if (currentColIndex < 0) return;
 
     const nextColIndex = currentColIndex + (direction === "next" ? 1 : -1);
-    if (nextColIndex < 0 || nextColIndex >= colOrder.length) return;
+    if (nextColIndex < 0 || nextColIndex >= columnDefs.length) return;
 
-    const nextColId = colOrder[nextColIndex];
-    const newStatus = statusMap[nextColId];
+    const nextCol = columnDefs[nextColIndex];
+    const newStatus = nextCol.backendStatus;
 
     try {
       if (task.backendId) {
         await apiUpdateTask(task.backendId, { status: newStatus });
       }
-      setTasksList((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus, progress: newStatus === "Completed" ? 100 : t.progress } : t))
+      const updated = tasksList.map((t) =>
+        t.id === taskId ? { ...t, status: newStatus, progress: newStatus === "DONE" ? 100 : t.progress } : t
       );
-      notify(`Task ${taskId} moved to ${newStatus}.`);
+      setTasksList(updated);
+      notify(`Task ${taskId} moved to ${nextCol.title}.`);
+      syncSprintMetrics(updated);
     } catch (err: any) {
       notify(`Failed to update task: ${err?.message || "Server error"}`);
     }
@@ -451,7 +492,11 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
     if (!window.confirm("Complete this sprint? All completed work will be finalized.")) return;
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, { status: "COMPLETED" });
+        await sprintApi.update(sprint._id, {
+          status: "COMPLETED",
+          progress: 100,
+          completedStoryPoints: completedPoints,
+        });
       }
       notify("Sprint marked as Completed successfully.");
       loadSprintData();
@@ -464,7 +509,7 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
     if (!window.confirm("Are you sure you want to end this sprint early?")) return;
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, { status: "CLOSED" });
+        await sprintApi.update(sprint._id, { status: "CLOSED" });
       }
       notify("Sprint closed.");
       loadSprintData();
@@ -476,7 +521,7 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
   const saveSprintGoal = async () => {
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, { goal });
+        await sprintApi.update(sprint._id, { goal });
       }
       setShowGoalEdit(false);
       notify("Sprint goal updated successfully.");
@@ -486,10 +531,25 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
   };
 
   const sprintName = sprint?.name || `Sprint ${sprintId}`;
-  const sprintCode = sprint?.sprintCode || sprint?.code || sprintId.toUpperCase();
-  const startDateStr = sprint?.startDate ? new Date(sprint.startDate).toLocaleDateString("en-IN") : "Not set";
-  const endDateStr = sprint?.endDate ? new Date(sprint.endDate).toLocaleDateString("en-IN") : "Not set";
+  const sprintCode = sprint?.sprintCode || sprintId.toUpperCase();
+  const startDateStr = sprint?.start || "Not set";
+  const endDateStr = sprint?.end || "Not set";
   const sprintStatus = sprint?.status || "In Progress";
+  const dodItems = useMemo(() => {
+    if (sprint?.definitionOfDone && sprint.definitionOfDone.trim()) {
+      return sprint.definitionOfDone
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+        .filter(Boolean);
+    }
+    return [
+      "Code complete & reviewed",
+      "Unit tests written & passed",
+      "QA verification passed",
+      "Documentation updated",
+      "Product Owner approval",
+    ];
+  }, [sprint?.definitionOfDone]);
 
   const renderKanban = () => (
     <div className="as-kanban">
@@ -578,7 +638,7 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
                 <tr key={task.id}>
                   <td className="as-link">{task.id}</td>
                   <td>{task.title}</td>
-                  <td><Badge tone={task.status === "Completed" ? "success" : "blue"}>{task.status}</Badge></td>
+                  <td><Badge tone={task.status === "DONE" || task.status === "Completed" ? "success" : "blue"}>{formatTaskStatus(task.status)}</Badge></td>
                   <td>{task.assignee}</td>
                   <td>{task.points} SP</td>
                   <td>{task.progress}%</td>
@@ -650,6 +710,32 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
           <strong>Active Sprint ({sprintCode})</strong>
         </nav>
         <div className="as-actions">
+          {allSprints.length > 0 && (
+            <select
+              aria-label="Switch Sprint"
+              value={sprint?._id || sprint?.id || ""}
+              onChange={(e) => {
+                if (e.target.value) router.push(`/sprints/${encodeURIComponent(e.target.value)}/active`);
+              }}
+              style={{
+                height: "30px",
+                padding: "0 10px",
+                border: "1px solid #d5dfef",
+                borderRadius: "5px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#10204a",
+                background: "#ffffff",
+                cursor: "pointer",
+              }}
+            >
+              {allSprints.map((s) => (
+                <option key={s._id || s.id} value={s._id || s.id}>
+                  {s.sprintCode} — {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={completeSprint}><CheckCircle2 size={12} /> Complete Sprint</button>
           <button className="as-end-button" onClick={endSprint}><AlertCircle size={12} /> End Sprint</button>
           <button className="as-primary-button" onClick={() => setShowTaskForm(true)}><Plus size={12} /> Create Task</button>
@@ -763,11 +849,9 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
                   ) : <p className="as-goal-text">{goal || "No sprint goal defined. Click Edit to establish the sprint objective."}</p>}
                   <strong className="as-definition-title">Definition of Done</strong>
                   <ul className="as-done-list">
-                    <li><CheckCircle2 size={13} /> Code complete & reviewed</li>
-                    <li><CheckCircle2 size={13} /> Unit tests written & passed</li>
-                    <li><CheckCircle2 size={13} /> QA verification passed</li>
-                    <li><CheckCircle2 size={13} /> Documentation updated</li>
-                    <li><CheckCircle2 size={13} /> Product Owner approval</li>
+                    {dodItems.map((item, idx) => (
+                      <li key={idx}><CheckCircle2 size={13} /> {item}</li>
+                    ))}
                   </ul>
                 </Panel>
               </section>
@@ -788,13 +872,14 @@ export default function ActiveSprint({ sprintId }: { sprintId: string }) {
             <div className="as-detail-list">
               <div><span>Sprint Code</span><strong>{sprintCode}</strong></div>
               <div><span>Sprint Name</span><strong>{sprintName}</strong></div>
-              <div><span>Project</span><strong>{sprint?.projectId?.name || sprint?.projectId?.projectName || "Linked Project"}</strong></div>
-              <div><span>Milestone</span><strong>{sprint?.milestoneId?.name || "Sprint Milestone"}</strong></div>
+              <div><span>Project</span><strong>{sprint?.projectName || "Not Linked"}</strong></div>
+              <div><span>Milestone</span><strong>{sprint?.milestoneName || "Not Linked"}</strong></div>
+              <div><span>Sprint Owner</span><strong>{sprint?.ownerName || "Unassigned"}</strong></div>
               <div><span>Total Tasks</span><strong>{totalTasks}</strong></div>
               <div><span>Story Points</span><strong>{totalPoints} SP</strong></div>
               <div><span>Start Date</span><strong>{startDateStr}</strong></div>
               <div><span>End Date</span><strong>{endDateStr}</strong></div>
-              <div><span>Status</span><strong><Badge tone={sprintStatus === "COMPLETED" ? "success" : "blue"}>{sprintStatus}</Badge></strong></div>
+              <div><span>Status</span><strong><Badge tone={sprintStatus === "Completed" ? "success" : "blue"}>{sprintStatus}</Badge></strong></div>
             </div>
           </Panel>
 

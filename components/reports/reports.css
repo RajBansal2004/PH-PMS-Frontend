@@ -1,0 +1,237 @@
+/* Compact PHEOS PMS Reports & Analytics Styles (RPT-001 to RPT-005 + Filters/Exports) */
+
+.rpt-page {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  color: #10204a;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.rpt-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.rpt-breadcrumb a {
+  color: #0755e9;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.rpt-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rpt-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #10204a;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.rpt-subtitle {
+  font-size: 11px;
+  color: #64748b;
+  margin: 2px 0 0;
+}
+
+.rpt-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+/* Subnav */
+.rpt-subnav {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 8px;
+}
+
+.rpt-subnav-link {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  text-decoration: none;
+}
+.rpt-subnav-link:hover { background: #f1f5f9; color: #10204a; }
+.rpt-subnav-link.active { background: #0755e9; color: #ffffff; }
+
+/* Buttons */
+.rpt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #d5dfef;
+  background: #ffffff;
+  color: #10204a;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.rpt-btn:hover:not(:disabled) { background: #f5f8fd; border-color: #b7c8e4; }
+.rpt-btn-primary { background: #0755e9; border-color: #0755e9; color: #ffffff; }
+.rpt-btn-primary:hover:not(:disabled) { background: #0544bd; }
+.rpt-btn-success { background: #079b62; border-color: #079b62; color: #ffffff; }
+.rpt-btn-danger { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.rpt-btn-sm { height: 25px; padding: 0 8px; font-size: 10.5px; }
+.rpt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Cards */
+.rpt-card {
+  background: #ffffff;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  padding: 13px 15px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+}
+
+.rpt-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rpt-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #10204a;
+  margin: 0;
+}
+
+/* KPI Grid */
+.rpt-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 9px;
+}
+
+.rpt-kpi {
+  background: #ffffff;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rpt-kpi-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.rpt-kpi-label { display: block; font-size: 10px; color: #64748b; font-weight: 500; }
+.rpt-kpi-val { font-size: 16px; font-weight: 700; color: #10204a; line-height: 1.2; }
+
+/* Badges */
+.rpt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rpt-badge-green { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.rpt-badge-red { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.rpt-badge-amber { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.rpt-badge-blue { background: #eff6ff; color: #0755e9; border: 1px solid #bfdbfe; }
+.rpt-badge-purple { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+.rpt-badge-slate { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
+/* Filters */
+.rpt-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  padding: 8px 11px;
+}
+
+.rpt-input,
+.rpt-select {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid #dce5f2;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #10204a;
+  background: #ffffff;
+  outline: none;
+}
+.rpt-input:focus, .rpt-select:focus { border-color: #0755e9; }
+
+.rpt-field { display: flex; flex-direction: column; gap: 3px; }
+.rpt-field label { font-size: 10px; font-weight: 600; color: #475569; }
+
+/* Tables */
+.rpt-table-wrap { width: 100%; overflow-x: auto; }
+.rpt-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.rpt-table thead tr { background: #f8fafd; border-bottom: 1px solid #e3eaf4; }
+.rpt-table th { padding: 8px 9px; text-align: left; font-size: 10px; font-weight: 700; color: #64748b; white-space: nowrap; }
+.rpt-table td { padding: 8px 9px; border-bottom: 1px solid #f1f5f9; color: #10204a; vertical-align: middle; }
+.rpt-table tbody tr:hover { background: #f8fbff; }
+
+/* Grids */
+.rpt-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rpt-grid-4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 11px; }
+@media (max-width: 900px) { .rpt-grid-2 { grid-template-columns: 1fr; } }
+
+/* Progress Bars */
+.rpt-bar-track { height: 7px; background: #e5ecf5; border-radius: 999px; overflow: hidden; min-width: 60px; }
+.rpt-bar-fill { height: 100%; border-radius: 999px; }
+
+/* Alerts */
+.rpt-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+.rpt-alert-ok { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.rpt-alert-err { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.rpt-alert-info { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+
+.rpt-empty { text-align: center; padding: 26px 14px; color: #64748b; font-size: 11.5px; }
+
+@media print {
+  .rpt-subnav, .rpt-actions, .rpt-filter-bar { display: none !important; }
+}

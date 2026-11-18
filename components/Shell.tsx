@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { useAuth } from "./AuthProvider";
+import { canAccessPath } from "../lib/rbac";
 
 import {
   Bell,
@@ -43,6 +44,7 @@ import {
   Flag,
   CalendarRange,
   GitBranch,
+  GitPullRequest,
   BarChart3,
   Calculator,
   KanbanSquare,
@@ -56,6 +58,13 @@ import {
   HandCoins,
   UserPlus,
   Bug,
+  Plus,
+  Layers,
+  CheckSquare,
+  MapPin,
+  ShieldAlert,
+  Rocket,
+  Server,
 } from "lucide-react";
 
 /* =========================================================
@@ -69,8 +78,44 @@ type NavigationItem = {
 };
 
 type NavigationGroup = NavigationItem & {
+  section?: string;
   children?: NavigationItem[];
 };
+
+const NAV_SECTION_BY_HREF: Record<string, string> = {
+  "/dashboard": "Overview",
+  "/projects": "Delivery",
+  "/brd-requirements/brd-registry": "Delivery",
+  "/milestones": "Delivery",
+  "/sprints": "Delivery",
+  "/tasks": "Delivery",
+  "/qa": "Delivery",
+  "/deployments": "Delivery",
+  "/risks": "Delivery",
+  "/resources": "People & Time",
+  "/capacity": "People & Time",
+  "/timesheets": "People & Time",
+  "/approvals": "People & Time",
+  "/clients": "Commercial",
+  "/finance": "Commercial",
+  "/reports": "Commercial",
+  "/documents": "Commercial",
+  "/organization": "Administration",
+  "/teams": "Administration",
+  "/users": "Administration",
+  "/roles-permissions": "Administration",
+  "/integrations": "Administration",
+  "/audit": "Administration",
+  "/settings": "Administration",
+};
+
+const NAV_SECTION_ORDER = [
+  "Overview",
+  "Delivery",
+  "People & Time",
+  "Commercial",
+  "Administration",
+];
 
 /* =========================================================
    NAVIGATION CONFIGURATION
@@ -81,6 +126,13 @@ const navigation: NavigationGroup[] = [
     label: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+    children: [
+      { label: "Executive Overview", href: "/dashboard", icon: LayoutDashboard },
+      { label: "PM Workbench", href: "/dashboard/pm", icon: FolderKanban },
+      { label: "Team Lead Dashboard", href: "/dashboard/tl", icon: Users },
+      { label: "My Work", href: "/dashboard/my-work", icon: CheckSquare },
+      { label: "Portfolio Overview", href: "/dashboard/portfolio", icon: BriefcaseBusiness },
+    ],
   },
   {
     label: "Projects",
@@ -141,6 +193,11 @@ const navigation: NavigationGroup[] = [
         href: "/brd-requirements/approval-center",
         icon: ShieldCheck,
       },
+      {
+        label: "Change Requests",
+        href: "/brd-requirements/change-requests",
+        icon: GitPullRequest,
+      },
     ],
   },
   {
@@ -199,22 +256,22 @@ const navigation: NavigationGroup[] = [
     },
     {
       label: "Sprint Planning",
-      href: "/sprints/SPR-003/planning",
+      href: "/sprints/current/planning",
       icon: ClipboardList,
     },
     {
       label: "Active Sprint",
-      href: "/sprints/SPR-004/active",
+      href: "/sprints/current/active",
       icon: Activity,
     },
     {
       label: "Sprint Review",
-      href: "/sprints/review/SPR-005",
+      href: "/sprints/review/current",
       icon: ClipboardCheck,
     },
     {
       label: "Sprint Retrospective",
-      href: "/sprints/retrospective/SPR-006",
+      href: "/sprints/retrospective/current",
       icon: MessageSquareText,
     },
     {
@@ -246,9 +303,34 @@ const navigation: NavigationGroup[] = [
       icon: ClipboardList,
     },
     {
+      label: "Create Task",
+      href: "/tasks/new",
+      icon: Plus,
+    },
+    {
       label: "Kanban Board",
       href: "/tasks/kanban",
       icon: LayoutGrid,
+    },
+    {
+      label: "Backlog Manager",
+      href: "/tasks/backlog",
+      icon: Layers,
+    },
+    {
+      label: "My Tasks",
+      href: "/tasks/my",
+      icon: CheckSquare,
+    },
+    {
+      label: "Dependency Graph",
+      href: "/tasks/dependency-graph",
+      icon: GitBranch,
+    },
+    {
+      label: "Activity Audit",
+      href: "/tasks/audit",
+      icon: Activity,
     },
   ],
 },
@@ -256,31 +338,232 @@ const navigation: NavigationGroup[] = [
     label: "QA & Bugs",
     href: "/qa",
     icon: Bug,
+    children: [
+      {
+        label: "QA Dashboard",
+        href: "/qa",
+        icon: BarChart3,
+      },
+      {
+        label: "Test Cases",
+        href: "/qa/test-cases",
+        icon: ClipboardCheck,
+      },
+      {
+        label: "Create Test Case",
+        href: "/qa/test-cases/new",
+        icon: Plus,
+      },
+      {
+        label: "Test Runs",
+        href: "/qa/test-runs",
+        icon: Activity,
+      },
+      {
+        label: "Bug Registry",
+        href: "/qa/bugs",
+        icon: Bug,
+      },
+      {
+        label: "Report Bug",
+        href: "/qa/bugs/new",
+        icon: Plus,
+      },
+    ],
   },
   {
     label: "Approval Center",
     href: "/approvals",
     icon: ShieldCheck,
+    children: [
+      {
+        label: "My Approvals",
+        href: "/approvals",
+        icon: ShieldCheck,
+      },
+      {
+        label: "Approval History",
+        href: "/approvals/history",
+        icon: Clock3,
+      },
+      {
+        label: "Approval Rules",
+        href: "/approvals/rules",
+        icon: ClipboardCheck,
+      },
+      {
+        label: "Delegation & Escalation",
+        href: "/approvals/delegations",
+        icon: Users,
+      },
+    ],
   },
   {
     label: "Resources",
     href: "/resources",
     icon: Users,
+    children: [
+      {
+        label: "Resource Directory",
+        href: "/resources",
+        icon: Users,
+      },
+      {
+        label: "Add New Resource",
+        href: "/resources/new",
+        icon: Plus,
+      },
+      {
+        label: "Project Allocation",
+        href: "/resources/allocate",
+        icon: UserPlus,
+      },
+      {
+        label: "Allocation Planner",
+        href: "/resources/planner",
+        icon: CalendarRange,
+      },
+      {
+        label: "Resource Calendar",
+        href: "/resources/calendar",
+        icon: CalendarDays,
+      },
+      {
+        label: "Bench & Availability",
+        href: "/resources/bench",
+        icon: Layers,
+      },
+    ],
+  },
+  {
+    label: "Capacity & Workload",
+    href: "/capacity",
+    icon: BarChart3,
+    children: [
+      {
+        label: "Team Capacity",
+        href: "/capacity",
+        icon: BarChart3,
+      },
+      {
+        label: "Individual Capacity",
+        href: "/capacity/individual",
+        icon: Users,
+      },
+      {
+        label: "Capacity Forecast",
+        href: "/capacity/forecast",
+        icon: Gauge,
+      },
+      {
+        label: "Utilization Heatmap",
+        href: "/capacity/heatmap",
+        icon: LayoutGrid,
+      },
+    ],
   },
   {
     label: "Timesheets",
     href: "/timesheets",
     icon: CalendarDays,
+    children: [
+      {
+        label: "My Timesheet",
+        href: "/timesheets",
+        icon: Clock3,
+      },
+      {
+        label: "Add Time Entry",
+        href: "/timesheets/new",
+        icon: Plus,
+      },
+      {
+        label: "Weekly Timesheet",
+        href: "/timesheets/weekly",
+        icon: CalendarRange,
+      },
+      {
+        label: "Team Timesheets",
+        href: "/timesheets/team",
+        icon: Users,
+      },
+      {
+        label: "Timesheet Approvals",
+        href: "/timesheets/approvals",
+        icon: ClipboardCheck,
+      },
+      {
+        label: "Timesheet Analytics",
+        href: "/timesheets/analytics",
+        icon: BarChart3,
+      },
+    ],
   },
   {
     label: "Finance",
     href: "/finance",
     icon: WalletCards,
+    children: [
+      { label: "Financial Overview", href: "/finance", icon: WalletCards },
+      { label: "Project Budgets", href: "/finance/budgets", icon: Calculator },
+      { label: "Invoices & Receipts", href: "/finance/invoices", icon: FileText },
+      { label: "Expenses & Costs", href: "/finance/expenses", icon: HandCoins },
+    ],
+  },
+  {
+    label: "Risks & Issues",
+    href: "/risks",
+    icon: ShieldAlert,
+    children: [
+      { label: "Risk Register", href: "/risks", icon: ShieldAlert },
+      { label: "Issue & Escalation Log", href: "/risks/issues", icon: Activity },
+    ],
+  },
+  {
+    label: "Deployments",
+    href: "/deployments",
+    icon: Rocket,
+    children: [
+      { label: "Release Pipeline", href: "/deployments", icon: Rocket },
+      { label: "Environments Matrix", href: "/deployments/environments", icon: Server },
+    ],
   },
   {
     label: "Reports",
     href: "/reports",
     icon: Gauge,
+    children: [
+      {
+        label: "Report Center",
+        href: "/reports",
+        icon: Gauge,
+      },
+      {
+        label: "Project Performance",
+        href: "/reports/projects",
+        icon: BarChart3,
+      },
+      {
+        label: "Resource Utilization",
+        href: "/reports/resources",
+        icon: Users,
+      },
+      {
+        label: "Timesheet & Productivity",
+        href: "/reports/timesheets",
+        icon: Clock3,
+      },
+      {
+        label: "QA & Defect Analytics",
+        href: "/reports/qa",
+        icon: Bug,
+      },
+      {
+        label: "Saved, Schedules & Exports",
+        href: "/reports/saved",
+        icon: ClipboardList,
+      },
+    ],
   },
   {
     label: "Organization",
@@ -301,6 +584,16 @@ const navigation: NavigationGroup[] = [
         label: "Designations",
         href: "/organization/designations",
         icon: BriefcaseBusiness,
+      },
+      {
+        label: "Locations & Branches",
+        href: "/organization/locations",
+        icon: MapPin,
+      },
+      {
+        label: "Holiday & Working Calendars",
+        href: "/organization/calendars",
+        icon: CalendarDays,
       },
     ],
   },
@@ -350,16 +643,104 @@ const navigation: NavigationGroup[] = [
     label: "Documents",
     href: "/documents",
     icon: FileText,
+    children: [
+      {
+        label: "Document Repository",
+        href: "/documents",
+        icon: FileText,
+      },
+      {
+        label: "Upload Document",
+        href: "/documents/upload",
+        icon: Plus,
+      },
+      {
+        label: "Categories & Governance",
+        href: "/documents/categories",
+        icon: Layers,
+      },
+    ],
   },
   {
     label: "Integrations",
     href: "/integrations",
     icon: HardDrive,
+    children: [
+      {
+        label: "Marketplace",
+        href: "/integrations",
+        icon: LayoutGrid,
+      },
+      {
+        label: "Connection Status",
+        href: "/integrations/status",
+        icon: Activity,
+      },
+      {
+        label: "Sync History",
+        href: "/integrations/sync-history",
+        icon: Clock3,
+      },
+      {
+        label: "Integration Logs",
+        href: "/integrations/logs",
+        icon: ClipboardList,
+      },
+    ],
+  },
+  {
+    label: "Audit & Compliance",
+    href: "/audit",
+    icon: ShieldCheck,
+    children: [
+      {
+        label: "Audit Explorer",
+        href: "/audit",
+        icon: ShieldCheck,
+      },
+      {
+        label: "Security Activity",
+        href: "/audit/security",
+        icon: Activity,
+      },
+      {
+        label: "Compliance & Retention",
+        href: "/audit/compliance",
+        icon: ClipboardCheck,
+      },
+    ],
   },
   {
     label: "Settings",
     href: "/settings",
     icon: Settings,
+    children: [
+      {
+        label: "General Settings",
+        href: "/settings",
+        icon: Settings,
+      },
+      {
+        label: "Workflow Settings",
+        href: "/settings/workflows",
+        icon: GitBranch,
+      },
+      {
+        label: "Master Data",
+        href: "/settings/master-data",
+        icon: Layers,
+      },
+      {
+        label: "System Health",
+        href: "/settings/health",
+        icon: Activity,
+      },
+      {
+        label: "Feature Flags",
+        href: "/settings/feature-flags",
+        icon: Flag,
+      },
+    ],
   },
 ];
 
@@ -380,7 +761,7 @@ function isRouteActive(pathname: string, href: string): boolean {
       pathname.startsWith(`${href}/`)
     );
   }
-  if (href === "/milestones") {
+  if (href === "/dashboard" || href === "/finance" || href === "/risks" || href === "/deployments" || href === "/milestones" || href === "/timesheets" || href === "/qa" || href === "/documents" || href === "/reports" || href === "/audit" || href === "/integrations" || href === "/settings" || href === "/approvals") {
     return pathname === href;
   }
 
@@ -391,6 +772,42 @@ function isGroupActive(
   pathname: string,
   item: NavigationGroup,
 ): boolean {
+  if (item.label === "Finance") {
+    return pathname === "/finance" || pathname.startsWith("/finance/");
+  }
+  if (item.label === "Risks & Issues") {
+    return pathname === "/risks" || pathname.startsWith("/risks/");
+  }
+  if (item.label === "Deployments") {
+    return pathname === "/deployments" || pathname.startsWith("/deployments/");
+  }
+  if (item.label === "Dashboard") {
+    return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+  }
+  if (item.label === "Approval Center") {
+    return pathname === "/approvals" || pathname.startsWith("/approvals/");
+  }
+  if (item.label === "Settings") {
+    return pathname === "/settings" || pathname.startsWith("/settings/");
+  }
+  if (item.label === "Integrations") {
+    return pathname === "/integrations" || pathname.startsWith("/integrations/");
+  }
+  if (item.label === "Audit & Compliance") {
+    return pathname === "/audit" || pathname.startsWith("/audit/");
+  }
+  if (item.label === "Reports") {
+    return pathname === "/reports" || pathname.startsWith("/reports/");
+  }
+  if (item.label === "Documents") {
+    return pathname === "/documents" || pathname.startsWith("/documents/");
+  }
+  if (item.label === "QA & Bugs") {
+    return pathname === "/qa" || pathname.startsWith("/qa/");
+  }
+  if (item.label === "Timesheets") {
+    return pathname === "/timesheets" || pathname.startsWith("/timesheets/");
+  }
   if (item.label === "Projects") {
     return pathname === "/projects" ||
       pathname.startsWith("/projects/");
@@ -415,6 +832,121 @@ function isGroupActive(
   return isRouteActive(pathname, item.href);
 }
 
+function getBreadcrumbContext(pathname: string) {
+  if (pathname.startsWith("/teams")) {
+    return { group: "Organization", page: "Teams Management" };
+  }
+  if (pathname.startsWith("/users/roles") || pathname.startsWith("/roles-permissions")) {
+    return { group: "Users & RBAC", page: "Roles, Permissions & Security Matrix" };
+  }
+  if (pathname.startsWith("/qa")) {
+    if (pathname === "/qa") return { group: "QA & Bug Management", page: "QA Dashboard" };
+    if (pathname === "/qa/test-cases") return { group: "QA & Bug Management", page: "Test Case Registry" };
+    if (pathname === "/qa/test-cases/new") return { group: "QA & Bug Management", page: "Create Test Case" };
+    if (pathname === "/qa/test-runs") return { group: "QA & Bug Management", page: "Test Runs & Execution" };
+    if (pathname === "/qa/bugs") return { group: "QA & Bug Management", page: "Bug Registry" };
+    if (pathname === "/qa/bugs/new") return { group: "QA & Bug Management", page: "Report Bug" };
+    if (pathname.startsWith("/qa/bugs/")) return { group: "QA & Bug Management", page: "Bug Details" };
+    return { group: "QA & Bug Management", page: "QA" };
+  }
+  if (pathname.startsWith("/timesheets")) {
+    if (pathname === "/timesheets") return { group: "Timesheets", page: "My Timesheet" };
+    if (pathname === "/timesheets/new") return { group: "Timesheets", page: "Add Time Entry" };
+    if (pathname === "/timesheets/weekly") return { group: "Timesheets", page: "Weekly Timesheet" };
+    if (pathname === "/timesheets/team") return { group: "Timesheets", page: "Team Timesheets" };
+    if (pathname === "/timesheets/approvals") return { group: "Timesheets", page: "Timesheet Approvals" };
+    if (pathname === "/timesheets/analytics") return { group: "Timesheets", page: "Timesheet Analytics" };
+    return { group: "Timesheets", page: "Timesheet" };
+  }
+  if (pathname.startsWith("/clients")) {
+    if (pathname === "/clients") return { group: "Client Management", page: "Client Registry" };
+    if (pathname === "/clients/new") return { group: "Client Management", page: "Create Client Wizard" };
+    if (pathname === "/clients/contacts") return { group: "Client Management", page: "Client Contacts" };
+    if (pathname === "/clients/contacts/new") return { group: "Client Management", page: "New Contact" };
+    if (pathname === "/clients/projects") return { group: "Client Management", page: "Client Projects" };
+    if (pathname === "/clients/activity") return { group: "Client Management", page: "Activity & Communication" };
+    if (pathname.includes("/edit")) return { group: "Client Management", page: "Edit Client" };
+    return { group: "Client Management", page: "Client Overview" };
+  }
+  if (pathname.startsWith("/projects")) {
+    if (pathname === "/projects") return { group: "Projects", page: "Project Registry" };
+    if (pathname === "/projects/new") return { group: "Projects", page: "Create Project Wizard" };
+    if (pathname === "/projects/my") return { group: "Projects", page: "My Projects" };
+    if (pathname === "/projects/templates") return { group: "Projects", page: "Templates" };
+    if (pathname === "/projects/calendar") return { group: "Projects", page: "Calendar" };
+    if (pathname === "/projects/timeline") return { group: "Projects", page: "Timeline" };
+    if (pathname === "/projects/financials") return { group: "Projects", page: "Financials" };
+    if (pathname === "/projects/health") return { group: "Projects", page: "Health" };
+    return { group: "Projects", page: "Project Details" };
+  }
+  if (pathname.startsWith("/brd-requirements")) {
+    if (pathname.includes("change-requests")) return { group: "BRD & Requirements", page: "Change Requests" };
+    if (pathname.includes("requirements")) return { group: "BRD & Requirements", page: "Requirements Registry" };
+    if (pathname.includes("traceability")) return { group: "BRD & Requirements", page: "Traceability Matrix" };
+    if (pathname.includes("approval")) return { group: "BRD & Requirements", page: "Approval Center" };
+    return { group: "BRD & Requirements", page: "BRD Registry" };
+  }
+  if (pathname.startsWith("/milestones")) {
+    if (pathname.includes("calendar")) return { group: "Milestones", page: "Milestone Calendar" };
+    if (pathname.includes("timeline")) return { group: "Milestones", page: "Milestone Timeline" };
+    if (pathname.includes("reports")) return { group: "Milestones", page: "Milestone Reports" };
+    return { group: "Milestones", page: "Milestone Registry" };
+  }
+  if (pathname.startsWith("/sprints")) {
+    if (pathname.includes("/new")) return { group: "Sprint Management", page: "Create Sprint" };
+    if (pathname.includes("planning")) return { group: "Sprint Management", page: "Sprint Planning" };
+    if (pathname.includes("active")) return { group: "Sprint Management", page: "Active Sprint" };
+    if (pathname.includes("review")) return { group: "Sprint Management", page: "Sprint Review" };
+    if (pathname.includes("retrospective")) return { group: "Sprint Management", page: "Sprint Retrospective" };
+    if (pathname.includes("backlog")) return { group: "Sprint Management", page: "Sprint Backlog" };
+    if (pathname.includes("standup")) return { group: "Sprint Management", page: "Daily Standup" };
+    return { group: "Sprint Management", page: "Sprint Registry" };
+  }
+  if (pathname.startsWith("/tasks")) {
+    if (pathname.includes("/new")) return { group: "Tasks / Kanban", page: "Create Task" };
+    if (pathname.includes("kanban")) return { group: "Tasks / Kanban", page: "Kanban Board" };
+    if (pathname.includes("backlog")) return { group: "Tasks / Kanban", page: "Backlog Manager" };
+    if (pathname.includes("/my")) return { group: "Tasks / Kanban", page: "My Tasks" };
+    if (pathname.includes("dependency-graph")) return { group: "Tasks / Kanban", page: "Dependency Graph" };
+    if (pathname.includes("audit")) return { group: "Tasks / Kanban", page: "Activity Audit" };
+    return { group: "Tasks / Kanban", page: "Task Registry" };
+  }
+  if (pathname.startsWith("/organization")) {
+    if (pathname.includes("departments")) return { group: "Organization", page: "Departments" };
+    if (pathname.includes("designations")) return { group: "Organization", page: "Designations" };
+    return { group: "Organization", page: "Profile" };
+  }
+  if (pathname === "/dashboard") return { group: "PMS", page: "Dashboard" };
+  if (pathname.startsWith("/users")) return { group: "Administration", page: "Users" };
+  if (pathname.startsWith("/roles-permissions")) return { group: "Administration", page: "Roles & Permissions" };
+  if (pathname.startsWith("/settings")) return { group: "Administration", page: "Settings" };
+  if (pathname.startsWith("/timesheets")) return { group: "Work & Time", page: "Timesheets" };
+  if (pathname.startsWith("/qa")) return { group: "Quality Assurance", page: "QA & Bugs" };
+  if (pathname.startsWith("/approvals")) return { group: "Approval Engine", page: "Approvals" };
+  if (pathname.startsWith("/finance")) return { group: "Finance", page: "Financial Overview" };
+  if (pathname.startsWith("/reports")) return { group: "Analytics", page: "Reports" };
+
+  const seg = pathname.replace(/^\//, "").split("/")[0];
+  const formatted = seg ? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, " ") : "Overview";
+  return { group: "PMS", page: formatted };
+}
+
+function getTopbarCta(pathname: string) {
+  if (pathname.startsWith("/clients")) {
+    return { label: "+ Add New Client", href: "/clients/new" };
+  }
+  if (pathname.startsWith("/projects")) {
+    return { label: "+ New Project", href: "/projects/new" };
+  }
+  if (pathname.startsWith("/tasks")) {
+    return { label: "+ New Task", href: "/tasks/new" };
+  }
+  if (pathname.startsWith("/sprints")) {
+    return { label: "+ New Sprint", href: "/sprints/new" };
+  }
+  return { label: "+ New Project", href: "/projects/new" };
+}
+
 /* =========================================================
    SHELL
 ========================================================= */
@@ -425,7 +957,33 @@ export function Shell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const { user, signOut } = useAuth();
+  const {
+    user,
+    signOut,
+    effectiveRoleCode,
+    roleProfile,
+  } = useAuth();
+
+  const filteredNavigation = useMemo<NavigationGroup[]>(() => {
+    const out: NavigationGroup[] = [];
+    for (const group of navigation) {
+      if (group.children?.length) {
+        const visibleChildren = group.children.filter((c) =>
+          canAccessPath(effectiveRoleCode, c.href)
+        );
+        if (!visibleChildren.length) continue;
+        const mainAllowed = canAccessPath(effectiveRoleCode, group.href);
+        out.push({
+          ...group,
+          href: mainAllowed ? group.href : visibleChildren[0].href,
+          children: visibleChildren,
+        });
+      } else if (canAccessPath(effectiveRoleCode, group.href)) {
+        out.push(group);
+      }
+    }
+    return out;
+  }, [effectiveRoleCode]);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -434,8 +992,21 @@ export function Shell({
   const [searchQuery, setSearchQuery] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  /* Close dropdown when clicking outside */
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setUserDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   /* =======================================================
      KEEP CURRENT SECTION EXPANDED
@@ -460,12 +1031,12 @@ export function Shell({
 
   const allNavigationItems = useMemo(
     () =>
-      navigation.flatMap((item) =>
+      filteredNavigation.flatMap((item) =>
         item.children
           ? [item, ...item.children]
           : [item],
       ),
-    [],
+    [filteredNavigation],
   );
 
   const searchResults = useMemo(() => {
@@ -638,92 +1209,116 @@ export function Shell({
         {/* NAVIGATION */}
 
         <nav className="nav-list">
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            const hasChildren = Boolean(item.children?.length);
-            const groupActive = isGroupActive(pathname, item);
-            const isExpanded = expandedGroups.includes(item.label);
+          {NAV_SECTION_ORDER.map((sectionName) => {
+            const sectionItems = filteredNavigation.filter(
+              (item) => (NAV_SECTION_BY_HREF[item.href] || "Overview") === sectionName
+            );
+            if (sectionItems.length === 0) return null;
 
             return (
-              <div
-                key={item.href}
-                className="nav-group"
-              >
-                <div className="nav-main-row">
-                  <Link
-                    href={item.href}
-                    className={[
-                      "nav-item",
-                      groupActive ? "active" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    title={collapsed ? item.label : undefined}
-                    aria-current={
-                      !hasChildren && groupActive
-                        ? "page"
-                        : undefined
-                    }
-                    onClick={closeMobileNavigation}
-                  >
-                    <Icon size={16} aria-hidden="true" />
+              <div key={sectionName} className="nav-section">
+                {!collapsed && (
+                  <div className="nav-section-label">{sectionName}</div>
+                )}
 
-                    {!collapsed && (
-                      <span>{item.label}</span>
-                    )}
-                  </Link>
+                {sectionItems.map((item) => {
+                  const Icon = item.icon;
+                  const hasChildren = Boolean(item.children?.length);
+                  const groupActive = isGroupActive(pathname, item);
+                  const isExpanded = expandedGroups.includes(item.label);
 
-                  {hasChildren && !collapsed && (
-                    <button
-                      className="nav-expand-button"
-                      type="button"
-                      aria-label={`${isExpanded ? "Collapse" : "Expand"
-                        } ${item.label}`}
-                      aria-expanded={isExpanded}
-                      onClick={() => toggleGroup(item.label)}
+                  return (
+                    <div
+                      key={item.href}
+                      className="nav-group"
                     >
-                      {isExpanded ? (
-                        <ChevronDown size={13} />
-                      ) : (
-                        <ChevronRight size={13} />
-                      )}
-                    </button>
-                  )}
-                </div>
+                      <div
+                        className={[
+                          "nav-main-row",
+                          groupActive ? "is-active" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <Link
+                          href={item.href}
+                          className={[
+                            "nav-item",
+                            groupActive ? "active" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          title={item.label}
+                          aria-current={
+                            !hasChildren && groupActive
+                              ? "page"
+                              : undefined
+                          }
+                          onClick={closeMobileNavigation}
+                        >
+                          <Icon size={14} className="nav-icon" aria-hidden="true" />
 
-                {hasChildren &&
-                  isExpanded &&
-                  !collapsed && (
-                    <div className="subnav">
-                      {item.children!.map((child) => {
-                        const ChildIcon = child.icon;
-                        const childActive =
-                          isRouteActive(pathname, child.href);
+                          {!collapsed && (
+                            <span>{item.label}</span>
+                          )}
+                        </Link>
 
-                        return (
-                          <Link
-                            key={child.href}
-                            href={child.href}
-                            className={[
-                              childActive ? "active" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            aria-current={
-                              childActive ? "page" : undefined
-                            }
-                            onClick={closeMobileNavigation}
+                        {hasChildren && !collapsed && (
+                          <button
+                            className="nav-expand-button"
+                            type="button"
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"
+                              } ${item.label}`}
+                            aria-expanded={isExpanded}
+                            onClick={() => toggleGroup(item.label)}
                           >
-                            <ChildIcon
-                              size={14}
-                              aria-hidden="true"
-                            />
-                            <span>{child.label}</span>
-                          </Link>
-                        );
-                      })}
+                            {isExpanded ? (
+                              <ChevronDown size={12} />
+                            ) : (
+                              <ChevronRight size={12} />
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {hasChildren &&
+                        isExpanded &&
+                        !collapsed && (
+                          <div className="subnav">
+                            {item.children!.map((child) => {
+                              const ChildIcon = child.icon;
+                              const childActive =
+                                isRouteActive(pathname, child.href);
+
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={child.href}
+                                  title={child.label}
+                                  className={[
+                                    childActive ? "active" : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  aria-current={
+                                    childActive ? "page" : undefined
+                                  }
+                                  onClick={closeMobileNavigation}
+                                >
+                                  <ChildIcon
+                                    size={12}
+                                    className="nav-icon"
+                                    aria-hidden="true"
+                                  />
+                                  <span>{child.label}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        )}
                     </div>
-                  )}
+                  );
+                })}
               </div>
             );
           })}
@@ -766,7 +1361,6 @@ export function Shell({
       <main className="main-area">
         <header className="topbar">
           {/* MOBILE MENU */}
-
           <button
             className="mobile-menu"
             onClick={() => setMobileOpen(true)}
@@ -778,25 +1372,20 @@ export function Shell({
             <Menu size={20} />
           </button>
 
-          {/* PROJECT CONTEXT */}
-
+          {/* DYNAMIC BREADCRUMB CONTEXT */}
           <div className="topbar-left">
-            <Link
-              href="/projects"
-              className="project-context"
-              aria-label="Go to project registry"
-            >
-              <span aria-hidden="true">▣</span>
-              PRJ-00075
-              <ChevronDown size={12} />
-            </Link>
+            <div className="topbar-breadcrumb">
+              <span className="crumb-root">PMS</span>
+              <ChevronRight size={12} className="crumb-sep" />
+              <span className="crumb-group">{getBreadcrumbContext(pathname).group}</span>
+              <ChevronRight size={12} className="crumb-sep" />
+              <span className="crumb-active">{getBreadcrumbContext(pathname).page}</span>
+            </div>
           </div>
 
           {/* TOPBAR ACTIONS */}
-
           <div className="topbar-actions">
             {/* SEARCH */}
-
             <div
               className={[
                 "global-search",
@@ -829,7 +1418,7 @@ export function Shell({
                     closeSearch();
                   }
                 }}
-                placeholder="Search navigation..."
+                placeholder="Search navigation... (Ctrl + K)"
                 aria-label="Search navigation"
                 aria-expanded={
                   searchOpen && searchQuery.trim().length > 0
@@ -870,39 +1459,53 @@ export function Shell({
               )}
             </div>
 
-            {/* NEW PROJECT */}
+            {/* READ-ONLY INDICATOR FOR AUDITOR */}
+            {roleProfile.readOnly && (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  padding: "3px 8px",
+                  borderRadius: 999,
+                  background: "#fffbeb",
+                  color: "#b45309",
+                  border: "1px solid #fde68a",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Read-Only
+              </span>
+            )}
 
-            <Link
-              className="btn primary"
-              href="/projects/new"
-            >
-              + New Project
-            </Link>
+            {/* DYNAMIC PRIMARY CTA (Hidden for Read-Only / Restricted CTA routes) */}
+            {!roleProfile.readOnly && canAccessPath(effectiveRoleCode, getTopbarCta(pathname).href) && (
+              <Link
+                className="btn primary"
+                href={getTopbarCta(pathname).href}
+              >
+                {getTopbarCta(pathname).label}
+              </Link>
+            )}
 
             {/* NOTIFICATIONS */}
-
             <button
               className="icon-btn"
               type="button"
               aria-label="Notifications"
             >
               <Bell size={17} />
-              <i aria-hidden="true">3</i>
             </button>
 
             {/* MESSAGES */}
-
             <button
               className="icon-btn"
               type="button"
               aria-label="Messages"
             >
               <MessageSquare size={17} />
-              <i aria-hidden="true">2</i>
             </button>
 
             {/* HELP */}
-
             <button
               className="icon-btn"
               type="button"
@@ -911,32 +1514,71 @@ export function Shell({
               <CircleHelp size={17} />
             </button>
 
-            {/* USER */}
-
-            <div className="user-menu">
-              <div
-                className="avatar"
-                aria-label={`User ${userName}`}
-              >
-                {userInitials}
-              </div>
-
-              <div className="user-details">
-                <strong>{userName}</strong>
-                <span>{userRole}</span>
-              </div>
-
-              <ChevronDown size={13} aria-hidden="true" />
-
+            {/* DYNAMIC USER MENU WITH DROPDOWN */}
+            <div className="user-menu-wrapper" ref={userMenuRef}>
               <button
-                onClick={handleSignOut}
-                title="Sign out"
+                className="user-menu-btn"
                 type="button"
-                aria-label="Sign out"
-                disabled={signingOut}
+                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                aria-expanded={userDropdownOpen}
+                aria-label="User menu"
               >
-                <LogOut size={14} />
+                <div
+                  className="avatar"
+                  aria-label={`User ${userName}`}
+                >
+                  {userInitials}
+                </div>
+
+                <div className="user-details">
+                  <strong>{userName}</strong>
+                  <span>{userRole}</span>
+                </div>
+
+                <ChevronDown size={13} aria-hidden="true" />
               </button>
+
+              {userDropdownOpen && (
+                <div className="user-dropdown">
+                  <div className="user-dropdown-header">
+                    <div className="user-dropdown-name">{userName}</div>
+                    <div className="user-dropdown-email">{user?.email || "admin@pehalhealthcare.com"}</div>
+                    <span className="user-dropdown-role">{userRole}</span>
+                  </div>
+                  <div className="user-dropdown-items">
+                    {canAccessPath(effectiveRoleCode, "/organization") && (
+                      <Link
+                        href="/organization"
+                        className="user-dropdown-item"
+                        onClick={() => setUserDropdownOpen(false)}
+                      >
+                        <BriefcaseBusiness size={14} /> Organization Settings
+                      </Link>
+                    )}
+                    {canAccessPath(effectiveRoleCode, "/settings") && (
+                      <Link
+                        href="/settings"
+                        className="user-dropdown-item"
+                        onClick={() => setUserDropdownOpen(false)}
+                      >
+                        <Settings size={14} /> System Preferences
+                      </Link>
+                    )}
+                    <button
+                      className="user-dropdown-item danger"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        handleSignOut();
+                      }}
+                      disabled={signingOut}
+                      type="button"
+                    >
+                      <LogOut size={14} />
+                      <span>{signingOut ? "Signing out..." : "Sign Out"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>

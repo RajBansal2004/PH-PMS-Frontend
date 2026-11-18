@@ -1,35 +1,149 @@
-
 /* =========================================================
-   NAVIGATION ACCESSIBILITY
-========================================================= */
+   ORGANIZED SIDEBAR (SAME 150px / 64px WIDTH)
+   ========================================================= */
+
+.sidebar {
+  padding: 10px 6px 10px !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar .brand {
+  height: auto;
+  min-height: 44px;
+  padding: 2px 6px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  gap: 8px;
+}
+
+.sidebar .brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.sidebar .brand strong {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.sidebar .brand span {
+  font-size: 8.5px;
+  color: #93c5fd;
+}
+
+.sidebar .nav-list {
+  margin-top: 2px;
+  flex: 1;
+  padding: 2px 0 8px;
+}
+
+.nav-section {
+  margin-top: 8px;
+}
+
+.nav-section:first-child {
+  margin-top: 2px;
+}
+
+.nav-section + .nav-section {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.nav-section-label {
+  padding: 0 7px 4px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(148, 179, 224, 0.65);
+  user-select: none;
+}
+
+.nav-group {
+  margin: 1px 0;
+}
 
 .nav-main-row {
   display: flex;
   align-items: center;
   min-width: 0;
+  border-radius: 6px;
+  transition: background-color 0.14s ease;
+}
+
+.nav-main-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-main-row.is-active {
+  background: #0758d8;
+  box-shadow: 0 3px 10px rgba(0, 73, 194, 0.28);
 }
 
 .nav-main-row > .nav-item {
   flex: 1;
   min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 6px;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #dbeafe;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 6px;
+}
+
+.nav-main-row.is-active > .nav-item {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nav-item .nav-icon,
+.subnav a .nav-icon {
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+.nav-main-row.is-active .nav-icon {
+  opacity: 1;
+}
+
+.nav-main-row > .nav-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-expand-button {
   display: grid;
   place-items: center;
-  flex: 0 0 28px;
-  width: 28px;
-  height: 32px;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 28px;
   padding: 0;
-  color: inherit;
+  margin-right: 2px;
+  color: rgba(219, 234, 254, 0.72);
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
 .nav-expand-button:hover {
-  background: rgb(255 255 255 / 10%);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.nav-main-row.is-active .nav-expand-button {
+  color: #ffffff;
 }
 
 .nav-expand-button:focus-visible,
@@ -37,18 +151,84 @@
 .subnav a:focus-visible,
 .collapse-btn:focus-visible {
   outline: 2px solid #7db4ff;
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-.subnav a {
+.sidebar .subnav {
+  margin: 3px 0 4px 12px;
+  padding: 2px 0 2px 7px;
+  border-left: 1px solid rgba(148, 179, 224, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar .subnav a {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #c7daf7;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.sidebar .subnav a:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.sidebar .subnav a.active {
+  background: rgba(18, 97, 237, 0.45);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.sidebar .subnav a span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar .collapse-btn {
+  margin-top: 6px;
+  padding: 9px 7px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0;
+  font-size: 10px;
+  font-weight: 500;
+  color: #bfdbfe;
+  gap: 7px;
+}
+
+.sidebar .collapse-btn:hover {
+  color: #ffffff;
+}
+
+/* Collapsed 64px state — neatly centered icons */
+.sidebar.is-collapsed .brand {
+  justify-content: center;
+  padding: 2px 0 10px;
+}
+
+.sidebar.is-collapsed .nav-main-row > .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.is-collapsed .collapse-btn {
+  justify-content: center;
+  padding: 9px 0 4px;
 }
 
 /* =========================================================
    GLOBAL SEARCH
-========================================================= */
+   ========================================================= */
 
 .global-search {
   position: relative;
@@ -98,7 +278,7 @@
 
 /* =========================================================
    ERROR MESSAGE
-========================================================= */
+   ========================================================= */
 
 .shell-error {
   margin: 12px 16px;
@@ -111,7 +291,7 @@
 
 /* =========================================================
    USER MENU
-========================================================= */
+   ========================================================= */
 
 .user-menu button:disabled {
   cursor: wait;
@@ -119,8 +299,170 @@
 }
 
 /* =========================================================
+   TOPBAR DYNAMIC ENHANCEMENTS
+   ========================================================= */
+
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.topbar-breadcrumb .crumb-root {
+  background: #0f62fe;
+  color: #fff;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.topbar-breadcrumb .crumb-sep {
+  color: #94a3b8;
+}
+
+.topbar-breadcrumb .crumb-group {
+  color: #475569;
+  font-weight: 600;
+}
+
+.topbar-breadcrumb .crumb-active {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.user-menu-wrapper {
+  position: relative;
+}
+
+.user-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.user-menu-btn:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.user-details strong {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.user-details span {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 240px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 8px 0;
+  z-index: 100;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.user-dropdown-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.user-dropdown-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.user-dropdown-email {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.user-dropdown-role {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 7px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.user-dropdown-items {
+  padding: 6px 0;
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #334155;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  background: none;
+  text-align: left;
+}
+
+.user-dropdown-item:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.user-dropdown-item.danger {
+  color: #dc2626;
+  border-top: 1px solid #f1f5f9;
+}
+
+.user-dropdown-item.danger:hover {
+  background: #fef2f2;
+}
+
+/* =========================================================
    RESPONSIVE
-========================================================= */
+   ========================================================= */
 
 @media (max-width: 768px) {
   .topbar-actions .global-search {

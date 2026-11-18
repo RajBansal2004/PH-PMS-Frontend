@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
@@ -30,17 +31,18 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  sprints as getSprints,
-  updateSprint as apiUpdateSprint,
   requirements as getRequirements,
   tasks as getTasks,
+  updateTask as apiUpdateTask,
   employees as getEmployees,
   getOrganizationAudit,
 } from "@/lib/api";
+import { sprintApi, type Sprint } from "@/lib/sprints/api";
 import "./sprint-planning.css";
 
 type BacklogItem = {
   id: string;
+  backendId?: string;
   title: string;
   type: "Requirement" | "Task";
   module: string;
@@ -121,8 +123,10 @@ function Panel({
 }
 
 export default function SprintPlanning({ sprintId }: { sprintId: string }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("scope");
-  const [sprint, setSprint] = useState<any>(null);
+  const [sprint, setSprint] = useState<Sprint | null>(null);
+  const [allSprints, setAllSprints] = useState<Sprint[]>([]);
   const [backlog, setBacklog] = useState<BacklogItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
@@ -172,43 +176,43 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [sRes, rRes, tRes, eRes, aRes] = await Promise.allSettled([
-          getSprints(),
+        const [resolvedRes, rRes, tRes, eRes, pRes, aRes] = await Promise.allSettled([
+          sprintApi.resolve(sprintId, ["PLANNED", "ACTIVE", "COMPLETED"]),
           getRequirements(),
           getTasks(),
-          getEmployees(),
-          getOrganizationAudit({ limit: 10 }).catch(() => ({ data: [] })),
+          getEmployees().catch(() => []),
+          sprintApi.getPersonnel(),
+          getOrganizationAudit({ limit: 10 }).catch(() => ({ items: [] })),
         ]);
 
-        let matchedSprint: any = null;
-        if (sRes.status === "fulfilled") {
-          const sList = Array.isArray(sRes.value) ? sRes.value : sRes.value?.data || sRes.value?.items || [];
-          matchedSprint = sList.find(
-            (s: any) =>
-              s._id === sprintId ||
-              s.id === sprintId ||
-              (s.sprintCode && s.sprintCode.toLowerCase() === sprintId.toLowerCase()) ||
-              (s.code && s.code.toLowerCase() === sprintId.toLowerCase())
-          ) || sList[0] || null;
+        let matchedSprint: Sprint | null = null;
+        if (resolvedRes.status === "fulfilled") {
+          setAllSprints(resolvedRes.value.allSprints);
+          matchedSprint = resolvedRes.value.sprint;
+        }
 
-          if (matchedSprint) {
-            setSprint(matchedSprint);
-            if (matchedSprint.startDate) {
-              setStartDate(new Date(matchedSprint.startDate).toISOString().slice(0, 10));
-            }
-            if (matchedSprint.endDate) {
-              setEndDate(new Date(matchedSprint.endDate).toISOString().slice(0, 10));
-            }
+        if (matchedSprint) {
+          setSprint(matchedSprint);
+          if (matchedSprint.startDate) {
+            setStartDate(matchedSprint.startDate);
+          }
+          if (matchedSprint.endDate) {
+            setEndDate(matchedSprint.endDate);
           }
         }
+
+        const sprintKey = matchedSprint?._id || sprintId;
+        const prelinkedIds: string[] = [];
 
         // Backlog items from Requirements & Tasks
         const backlogItems: BacklogItem[] = [];
         if (rRes.status === "fulfilled") {
-          const rList = Array.isArray(rRes.value) ? rRes.value : rRes.value?.data || rRes.value?.items || [];
+          const rawR: any = rRes.value;
+          const rList = Array.isArray(rawR) ? rawR : rawR?.data || rawR?.items || [];
           rList.forEach((r: any) => {
             backlogItems.push({
-              id: r.reqId || r.code || `REQ-${String(r._id || r.id).slice(-3).toUpperCase()}`,
+              id: r.reqId || r.requirementCode || r.code || `REQ-${String(r._id || r.id).slice(-3).toUpperCase()}`,
+              backendId: r._id || r.id,
               title: r.title || "Untitled Requirement",
               type: "Requirement",
               module: r.module || r.category || "General",
@@ -220,40 +224,85 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         }
 
         if (tRes.status === "fulfilled") {
-          const tList = Array.isArray(tRes.value) ? tRes.value : tRes.value?.data || tRes.value?.items || [];
+          const rawT: any = tRes.value;
+          const tList = Array.isArray(rawT) ? rawT : rawT?.data || rawT?.items || [];
           tList.forEach((t: any) => {
+            const code = t.taskId || t.code || `TSK-${String(t._id || t.id).slice(-3).toUpperCase()}`;
             backlogItems.push({
-              id: t.taskId || t.code || `TAS-${String(t._id || t.id).slice(-3).toUpperCase()}`,
+              id: code,
+              backendId: t._id || t.id,
               title: t.title || "Untitled Task",
               type: "Task",
               module: t.module || "General",
               priority: (t.priority || "Medium") as "High" | "Medium" | "Low",
-              points: Number(t.estimatedHours ? Math.round(t.estimatedHours / 4) : 3),
-              status: t.status || "Draft",
+              points: Number(t.storyPoints || (t.estimatedHours ? Math.round(t.estimatedHours / 4) : 3)),
+              status: t.status || "Open",
             });
+            if (t.sprintId === sprintKey || t.sprintId?._id === sprintKey || t.sprint === sprintKey) {
+              prelinkedIds.push(code);
+            }
           });
         }
         setBacklog(backlogItems);
 
-        // Employees
+        // Team from Employees + Users via sprintApi.getPersonnel()
+        const teamMap = new Map<string, TeamMember>();
         if (eRes.status === "fulfilled") {
-          const eList = Array.isArray(eRes.value) ? eRes.value : eRes.value?.data || eRes.value?.items || [];
-          const mappedTeam: TeamMember[] = eList.map((emp: any) => {
-            const empName = emp.name || emp.fullName || [emp.firstName, emp.lastName].filter(Boolean).join(" ") || "Employee";
-            return {
-              id: emp._id || emp.id,
-              name: empName,
-              role: emp.designation?.name || emp.role || "Developer",
-              availability: 100,
-              capacity: 80,
-              committed: 0,
-              initials: getInitials(empName),
-            };
+          const rawE: any = eRes.value;
+          const eList = Array.isArray(rawE) ? rawE : rawE?.data || rawE?.items || [];
+          eList.forEach((emp: any) => {
+            const empName = emp.name || emp.fullName || [emp.firstName, emp.lastName].filter(Boolean).join(" ");
+            if (empName) {
+              teamMap.set(empName, {
+                id: emp._id || emp.id,
+                name: empName,
+                role: emp.designation?.name || emp.designation || emp.role || "Developer",
+                availability: 100,
+                capacity: 80,
+                committed: 0,
+                initials: getInitials(empName),
+              });
+            }
           });
+        }
+        if (pRes.status === "fulfilled") {
+          (pRes.value || []).forEach((person) => {
+            if (person.name && !teamMap.has(person.name)) {
+              teamMap.set(person.name, {
+                id: person.id,
+                name: person.name,
+                role: person.email || "Team Member",
+                availability: 100,
+                capacity: 80,
+                committed: 0,
+                initials: getInitials(person.name),
+              });
+            }
+          });
+        }
+        const mappedTeam = Array.from(teamMap.values());
+        const savedPlanning = matchedSprint?.planning || {};
+        if (Array.isArray(savedPlanning.team) && savedPlanning.team.length > 0) {
+          const savedById = new Map<string, any>(savedPlanning.team.map((m: any) => [m.name, m]));
+          setTeam(
+            mappedTeam.map((m) => {
+              const saved = savedById.get(m.name);
+              return saved
+                ? {
+                    ...m,
+                    availability: Number(saved.availability ?? m.availability),
+                    capacity: Number(saved.capacity ?? m.capacity),
+                    committed: Number(saved.committed ?? m.committed),
+                  }
+                : m;
+            })
+          );
+        } else {
           setTeam(mappedTeam);
-          if (mappedTeam.length > 0) {
-            setRiskOwner(mappedTeam[0].name);
-          }
+        }
+
+        if (mappedTeam.length > 0) {
+          setRiskOwner(mappedTeam[0].name);
         }
 
         // Audit Activity
@@ -267,21 +316,21 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
           setActivities(mappedAudit);
         }
 
-        // Restore any draft saved in localStorage
-        try {
-          const savedDraft = localStorage.getItem(`sprint-planning-${sprintId}`);
-          if (savedDraft) {
-            const parsed = JSON.parse(savedDraft);
-            if (Array.isArray(parsed.selectedIds)) setSelectedIds(parsed.selectedIds);
-            if (Array.isArray(parsed.dependencies)) setDependencies(parsed.dependencies);
-            if (Array.isArray(parsed.risks)) setRisks(parsed.risks);
-            if (parsed.startDate) setStartDate(parsed.startDate);
-            if (parsed.endDate) setEndDate(parsed.endDate);
-            if (parsed.standupTime) setStandupTime(parsed.standupTime);
-          }
-        } catch {
-          // ignore draft parsing errors
+        // Restore saved planning state from backend first, then fallback to prelinked tasks
+        const mergedSelected = Array.from(
+          new Set([
+            ...(Array.isArray(savedPlanning.selectedIds) ? savedPlanning.selectedIds : []),
+            ...prelinkedIds,
+          ])
+        );
+        if (mergedSelected.length > 0) setSelectedIds(mergedSelected);
+        if (Array.isArray(savedPlanning.dependencies)) setDependencies(savedPlanning.dependencies);
+        if (Array.isArray(savedPlanning.risks)) setRisks(savedPlanning.risks);
+        if (Array.isArray(savedPlanning.workingDays) && savedPlanning.workingDays.length > 0) {
+          setWorkingDays(savedPlanning.workingDays);
         }
+        if (savedPlanning.standupTime) setStandupTime(savedPlanning.standupTime);
+        if (savedPlanning.timeZone) setTimeZone(savedPlanning.timeZone);
       } catch (err: any) {
         notify(`Failed to fetch planning data: ${err?.message || "Server error"}`);
       } finally {
@@ -293,9 +342,9 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
   }, [sprintId]);
 
   const sprintName = sprint?.name || `Sprint ${sprintId}`;
-  const milestoneName = sprint?.milestoneId?.name || "Sprint Milestone";
-  const sprintOwner = sprint?.ownerId?.name || sprint?.owner?.name || "Sprint Lead";
-  const sprintPriority = sprint?.priority || "High";
+  const milestoneName = sprint?.milestoneName || "Not Linked";
+  const sprintOwner = sprint?.ownerName || "Unassigned";
+  const sprintPriority = sprint?.priority || "Medium";
 
   const selectedItems = useMemo(
     () => backlog.filter((item) => selectedIds.includes(item.id)),
@@ -389,22 +438,38 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
     notify(`${riskType} added.`);
   };
 
-  const saveDraft = () => {
-    const draft = {
-      sprintId,
-      selectedIds,
-      team,
-      dependencies,
-      risks,
-      startDate,
-      endDate,
-      workingDays,
-      standupTime,
-      timeZone,
-      updatedAt: new Date().toISOString(),
-    };
-    localStorage.setItem(`sprint-planning-${sprintId}`, JSON.stringify(draft));
-    notify("Sprint planning draft saved.");
+  const buildPlanningPayload = () => ({
+    selectedIds,
+    team: team.map((m) => ({
+      id: m.id,
+      name: m.name,
+      availability: m.availability,
+      capacity: m.capacity,
+      committed: m.committed,
+    })),
+    dependencies,
+    risks,
+    workingDays,
+    standupTime,
+    timeZone,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const saveDraft = async () => {
+    try {
+      if (sprint?._id) {
+        await sprintApi.update(sprint._id, {
+          startDate: startDate ? new Date(`${startDate}T00:00:00`).toISOString() : undefined,
+          endDate: endDate ? new Date(`${endDate}T00:00:00`).toISOString() : undefined,
+          capacity: totalCapacity || sprint.capacity,
+          plannedStoryPoints: totalPoints,
+          planning: buildPlanningPayload(),
+        });
+      }
+      notify("Sprint planning draft saved to database.");
+    } catch (err: any) {
+      notify(`Could not save planning draft: ${err?.message || "API error"}`);
+    }
   };
 
   const recalculate = () => notify("Sprint capacity and story point totals recalculated.");
@@ -426,11 +491,22 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
   const confirmSprintPlan = async () => {
     try {
       if (sprint?._id) {
-        await apiUpdateSprint(sprint._id, {
+        await sprintApi.update(sprint._id, {
           status: "ACTIVE",
-          startDate: startDate ? new Date(startDate) : undefined,
-          endDate: endDate ? new Date(endDate) : undefined,
+          startDate: startDate ? new Date(`${startDate}T00:00:00`).toISOString() : undefined,
+          endDate: endDate ? new Date(`${endDate}T00:00:00`).toISOString() : undefined,
+          capacity: totalCapacity || sprint.capacity,
+          plannedStoryPoints: totalPoints,
+          planning: buildPlanningPayload(),
         });
+
+        // Link selected tasks directly to this sprint
+        const selectedTasks = selectedItems.filter((item) => item.type === "Task" && item.backendId);
+        if (selectedTasks.length > 0) {
+          await Promise.allSettled(
+            selectedTasks.map((t) => apiUpdateTask(t.backendId!, { sprintId: sprint._id }))
+          );
+        }
       }
       notify("Sprint plan committed successfully. Sprint is now Active.");
     } catch (err: any) {
@@ -585,21 +661,27 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         </Panel>
 
         <Panel title="Capacity vs Commitment" action={<Info size={13} />}>
-          <div className="sp-chart">
-            <div className="sp-chart-axis"><span>400</span><span>300</span><span>200</span><span>100</span><span>0</span></div>
-            <div className="sp-chart-area">
-              <div className="sp-chart-column">
-                <strong>{totalCapacity}h</strong>
-                <span className="sp-chart-bar blue" style={{ height: `${Math.min(100, (totalCapacity / 400) * 100)}%` }} />
-                <small>Total Capacity</small>
+          {(() => {
+            const maxCap = Math.max(100, Math.ceil(Math.max(totalCapacity, committedCapacity) / 100) * 100);
+            const ticks = [maxCap, Math.round(maxCap * 0.75), Math.round(maxCap * 0.5), Math.round(maxCap * 0.25), 0];
+            return (
+              <div className="sp-chart">
+                <div className="sp-chart-axis">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
+                <div className="sp-chart-area">
+                  <div className="sp-chart-column">
+                    <strong>{totalCapacity}h</strong>
+                    <span className="sp-chart-bar blue" style={{ height: `${Math.min(100, (totalCapacity / maxCap) * 100)}%` }} />
+                    <small>Total Capacity</small>
+                  </div>
+                  <div className="sp-chart-column">
+                    <strong>{committedCapacity}h</strong>
+                    <span className="sp-chart-bar green" style={{ height: `${Math.min(100, (committedCapacity / maxCap) * 100)}%` }} />
+                    <small>Committed Capacity</small>
+                  </div>
+                </div>
               </div>
-              <div className="sp-chart-column">
-                <strong>{committedCapacity}h</strong>
-                <span className="sp-chart-bar green" style={{ height: `${Math.min(100, (committedCapacity / 400) * 100)}%` }} />
-                <small>Committed Capacity</small>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
           <div className="sp-chart-legend"><span><i className="blue" />Total Capacity</span><span><i className="green" />Committed Capacity</span></div>
           <div className="sp-remaining"><span>Remaining Capacity</span><strong>{remainingCapacity}h</strong></div>
         </Panel>
@@ -786,7 +868,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
             <div>Committed Capacity<strong>{committedCapacity}h</strong></div>
           </div>
           <div className="sp-form-grid">
-            <label>Sprint Code<input value={sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()} readOnly /></label>
+            <label>Sprint Code<input value={sprint?.sprintCode || sprintId.toUpperCase()} readOnly /></label>
             <label>Sprint Name<input value={sprintName} readOnly /></label>
             <label>Milestone<input value={milestoneName} readOnly /></label>
             <label>Sprint Owner<input value={sprintOwner} readOnly /></label>
@@ -817,9 +899,35 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
           <ChevronRight size={13} />
           <Link href="/sprints">Sprint Registry</Link>
           <ChevronRight size={13} />
-          <strong>Sprint Planning ({sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()})</strong>
+          <strong>Sprint Planning ({sprint?.sprintCode || sprintId.toUpperCase()})</strong>
         </nav>
         <div className="sp-toolbar-actions">
+          {allSprints.length > 0 && (
+            <select
+              aria-label="Switch Sprint"
+              value={sprint?._id || sprint?.id || ""}
+              onChange={(e) => {
+                if (e.target.value) router.push(`/sprints/${encodeURIComponent(e.target.value)}/planning`);
+              }}
+              style={{
+                height: "30px",
+                padding: "0 10px",
+                border: "1px solid #d5dfef",
+                borderRadius: "5px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#10204a",
+                background: "#ffffff",
+                cursor: "pointer",
+              }}
+            >
+              {allSprints.map((s) => (
+                <option key={s._id || s.id} value={s._id || s.id}>
+                  {s.sprintCode} — {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={saveDraft}><Save size={12} /> Save as Draft</button>
           <button onClick={recalculate}><RefreshCw size={12} /> Recalculate</button>
           <button className="sp-primary-button" onClick={reviewAndStart}><ClipboardCheck size={12} /> Review & Start</button>
@@ -829,18 +937,18 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
       <div className="sp-title">
         <FileText size={24} />
         <div>
-          <h1>Sprint Planning ({sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}) <Badge tone="planning">Planning</Badge></h1>
+          <h1>Sprint Planning ({sprint?.sprintCode || sprintId.toUpperCase()}) <Badge tone="planning">{sprint?.status || "Planning"}</Badge></h1>
           <p>Plan and commit the work for the sprint including scope, team, capacity and schedule.</p>
         </div>
       </div>
 
       <section className="sp-overview">
-        <div className="sp-overview-cell"><span>Sprint</span><strong><CalendarDays size={13} /> {sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}</strong></div>
+        <div className="sp-overview-cell"><span>Sprint</span><strong><CalendarDays size={13} /> {sprint?.sprintCode || sprintId.toUpperCase()}</strong></div>
         <div className="sp-overview-cell"><span>Milestone</span><strong>{milestoneName}</strong></div>
         <div className="sp-overview-cell"><span>Sprint Name</span><strong>{sprintName}</strong></div>
-        <div className="sp-overview-cell"><span>Sprint Type</span><strong>Development</strong></div>
+        <div className="sp-overview-cell"><span>Sprint Type</span><strong>{sprint?.type || "Development"}</strong></div>
         <div className="sp-overview-cell"><span>Planned Dates</span><strong>{formatDate(startDate)} – {formatDate(endDate)}</strong><small>{duration} Days</small></div>
-        <div className="sp-overview-cell"><span>Status</span><strong><Badge tone="planning">Planning</Badge></strong></div>
+        <div className="sp-overview-cell"><span>Status</span><strong><Badge tone="planning">{sprint?.status || "Planning"}</Badge></strong></div>
         <div className="sp-overview-cell"><span>Sprint Owner</span><strong>{sprintOwner}</strong></div>
         <div className="sp-overview-cell"><span>Total Story Points</span><strong>{totalPoints} SP</strong></div>
         <div className="sp-overview-cell"><span>Total Tasks</span><strong>{selectedItems.length}</strong></div>
@@ -869,7 +977,7 @@ export default function SprintPlanning({ sprintId }: { sprintId: string }) {
         <aside className="sp-right-column">
           <Panel title="Sprint Summary" action={<button className="sp-icon-button" onClick={() => setActiveTab("scope")} aria-label="Edit sprint"><Pencil size={13} /></button>}>
             <div className="sp-summary-list">
-              <div><span>Sprint Code</span><strong>{sprint?.sprintCode || sprint?.code || sprintId.toUpperCase()}</strong></div>
+              <div><span>Sprint Code</span><strong>{sprint?.sprintCode || sprintId.toUpperCase()}</strong></div>
               <div><span>Sprint Name</span><strong>{sprintName}</strong></div>
               <div><span>Milestone</span><strong>{milestoneName}</strong></div>
               <div><span>Sprint Owner</span><strong>{sprintOwner}</strong></div>

@@ -1,268 +1,345 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Shell } from "../../components/Shell";
-import { StatusBadge } from "../../components/StatusBadge";
-import { getProjectsWithFinancials } from "@/lib/api";
 import {
   WalletCards,
   CircleDollarSign,
   TrendingUp,
   AlertTriangle,
   Receipt,
-  FileCheck,
-  Building,
   RefreshCw,
+  Download,
+  Eye,
+  X,
 } from "lucide-react";
+import {
+  financeApi,
+  formatInr,
+  formatInrCompact,
+  downloadCsv,
+  type FinanceOverviewData,
+} from "@/lib/phase2/api";
+import "@/components/phase2/phase2.css";
 
-type ProjectFinancialSummary = {
-  id: string;
-  code: string;
-  name: string;
-  client: string;
-  contractValue: number;
-  crValue: number;
-  netRevenue: number;
-  directCost: number;
-  contributionMargin: number;
-  marginPercent: number;
-  invoiced: number;
-  received: number;
-  outstanding: number;
-  costingMode: "Mode A (Full)" | "Mode B (Direct)" | "Mode C (Internal)";
-  isLive?: boolean;
+const COSTING_LABEL: Record<string, string> = {
+  MODE_A_FULL: "Mode A (Full)",
+  MODE_B_DIRECT: "Mode B (Direct)",
+  MODE_C_INTERNAL: "Mode C (Internal)",
 };
 
-function formatINR(val: number) {
-  return "₹ " + val.toLocaleString("en-IN");
-}
-
-export default function FinancePage() {
-  const [data, setData] = useState<ProjectFinancialSummary[]>([]);
+export default function FinanceOverviewPage() {
+  const [data, setData] = useState<FinanceOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [detailRow, setDetailRow] = useState<FinanceOverviewData["projectRegister"][number] | null>(null);
 
-  const fetchFinanceData = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await getProjectsWithFinancials();
-      if (res && res.items && res.items.length > 0) {
-        const mapped: ProjectFinancialSummary[] = res.items.map((p: any) => {
-          const contract = Number(p.contractValue || p.budget || 0);
-          const cr = Number(p.crValue || 0);
-          const net = contract + cr;
-          const cost = Number(p.directCost || p.actualCost || p.spent || 0);
-          const margin = net - cost;
-          const marginPct = net > 0 ? Number(((margin / net) * 100).toFixed(1)) : 0;
-          const inv = Number(p.invoicedAmount || p.invoiced || 0);
-          const rec = Number(p.receivedAmount || p.received || 0);
-          const out = inv - rec;
-
-          return {
-            id: p._id || p.id,
-            code: p.projectCode || p.code || `PHT-PRJ-${(p._id || "0000").slice(-4).toUpperCase()}`,
-            name: p.projectName || p.name || "Project",
-            client: p.clientId?.displayName || p.clientId?.legalName || p.clientName || "Client",
-            contractValue: contract,
-            crValue: cr,
-            netRevenue: net,
-            directCost: cost,
-            contributionMargin: margin,
-            marginPercent: marginPct,
-            invoiced: inv,
-            received: rec,
-            outstanding: out,
-            costingMode: p.billingType === "INTERNAL" ? "Mode C (Internal)" : "Mode A (Full)",
-            isLive: true,
-          };
-        });
-        setData(mapped);
-        setIsLiveConnected(true);
-      } else {
-        setData([]);
-        setIsLiveConnected(true);
-      }
-    } catch {
-      setData([]);
-      setIsLiveConnected(false);
+      const res = await financeApi.getOverview();
+      setData(res);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load financial overview");
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchFinanceData();
   }, []);
 
-  const totalContract = data.reduce((sum, d) => sum + d.contractValue, 0);
-  const totalNetRevenue = data.reduce((sum, d) => sum + d.netRevenue, 0);
-  const totalDirectCost = data.reduce((sum, d) => sum + d.directCost, 0);
-  const totalContributionMargin = totalNetRevenue - totalDirectCost;
-  const overallMarginPercent = totalNetRevenue > 0 ? ((totalContributionMargin / totalNetRevenue) * 100).toFixed(1) : "0";
-  const totalReceivables = data.reduce((sum, d) => sum + d.outstanding, 0);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const s = data?.summary;
+  const aging = data?.receivablesAging;
+  const maxAging = Math.max(
+    1,
+    aging?.current || 0,
+    aging?.days1_30 || 0,
+    aging?.days31_60 || 0,
+    aging?.days60Plus || 0
+  );
+
+  const exportCsv = () => {
+    if (!data?.projectRegister?.length) return;
+    downloadCsv(
+      "finance-commercial-register.csv",
+      ["Code", "Project", "Client", "Costing Mode", "Contract", "Approved CR", "Net Revenue", "Direct Cost", "Margin", "Margin %", "Invoiced", "Received", "Outstanding"],
+      data.projectRegister.map((r) => [
+        r.code,
+        r.name,
+        r.client,
+        COSTING_LABEL[r.costingMode] || r.costingMode,
+        r.contractValue,
+        r.approvedCrValue,
+        r.netRevenue,
+        r.directCost,
+        r.contributionMargin,
+        r.marginPercent,
+        r.invoiced,
+        r.received,
+        r.outstanding,
+      ])
+    );
+  };
 
   return (
-    <Shell>
-      <div>
-        <div className="page-head">
-          <div>
-            <div className="eyebrow">COMMERCIAL & COSTING CONTROL</div>
-            <h1>Financial Architecture & Contribution Margin</h1>
-            <p>Delivery cost accounting, contractual revenues, approved CR value, contribution margin, and receivables management.</p>
+    <div className="p2-page">
+      <div className="p2-header">
+        <div>
+          <div className="p2-breadcrumb">Finance &amp; Commercial Control / Overview (FIN-001)</div>
+          <h1 className="p2-title">
+            <WalletCards size={18} color="#0755e9" />
+            Financial Architecture &amp; Contribution Margin
+          </h1>
+          <div className="p2-subtitle">
+            Live contract revenues, approved CRs, direct delivery costs, contribution margins &amp; receivables aging
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ fontSize: "0.8rem", color: isLiveConnected ? "#059669" : "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: isLiveConnected ? "#059669" : "#94a3b8" }} />
-              {isLiveConnected ? "Live API Connected" : "Local / Seed View"}
-            </span>
-            <button
-              type="button"
-              className="btn outline"
-              onClick={fetchFinanceData}
-              disabled={loading}
-              title="Sync financials from backend"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} style={{ marginRight: "4px" }} />
-              {loading ? "Syncing..." : "Sync API"}
-            </button>
+        </div>
+        <div className="p2-actions">
+          <div className="p2-tabs">
+            <Link href="/finance" className="p2-tab active">Overview</Link>
+            <Link href="/finance/budgets" className="p2-tab">Budgets</Link>
+            <Link href="/finance/invoices" className="p2-tab">Invoices</Link>
+            <Link href="/finance/expenses" className="p2-tab">Expenses</Link>
+          </div>
+          <button type="button" className="p2-btn" onClick={exportCsv} disabled={!data?.projectRegister?.length}>
+            <Download size={13} /> CSV
+          </button>
+          <button type="button" className="p2-btn" onClick={() => void load()} disabled={loading}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="p2-banner-err">{error}</div>}
+
+      {/* KPIs */}
+      <div className="p2-kpi-grid">
+        <div className="p2-kpi-card">
+          <div className="p2-kpi-label">Net Contracted Revenue <CircleDollarSign size={14} color="#0755e9" /></div>
+          <div className="p2-kpi-value">{s ? formatInrCompact(s.totalNetRevenue) : "—"}</div>
+          <div className="p2-kpi-sub">
+            Contract {formatInrCompact(s?.totalContractValue)} + CRs {formatInrCompact(s?.totalApprovedCr)}
           </div>
         </div>
 
-        {/* FINANCIAL KPIS */}
-        <div className="kpi-grid" style={{ marginBottom: "1.5rem" }}>
-          <div className="kpi card">
-            <CircleDollarSign size={24} color="#2563eb" />
-            <div>
-              <small>Total Contracted Revenue</small>
-              <strong>{formatINR(totalContract)}</strong>
-              <small style={{ color: "#059669" }}>+ ₹ 4.5L Approved CRs</small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <TrendingUp size={24} color="#059669" />
-            <div>
-              <small>Portfolio Contribution Margin</small>
-              <strong>{overallMarginPercent}%</strong>
-              <small style={{ color: "#059669" }}>{formatINR(totalContributionMargin)}</small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <WalletCards size={24} color="#d97706" />
-            <div>
-              <small>Direct Delivery Cost</small>
-              <strong>{formatINR(totalDirectCost)}</strong>
-              <small style={{ color: "#64748b" }}>Labor + Cloud + APIs</small>
-            </div>
-          </div>
-          <div className="kpi card">
-            <AlertTriangle size={24} color="#dc2626" />
-            <div>
-              <small>Outstanding Receivables</small>
-              <strong>{formatINR(totalReceivables)}</strong>
-              <small style={{ color: "#dc2626" }}>Overdue: ₹ 2.5L</small>
-            </div>
+        <div className="p2-kpi-card">
+          <div className="p2-kpi-label">Contribution Margin <TrendingUp size={14} color="#079b62" /></div>
+          <div className="p2-kpi-value">{s ? `${s.overallMarginPercent}%` : "—"}</div>
+          <div className="p2-kpi-sub">
+            {formatInrCompact(s?.totalContributionMargin)} · Net Profit {formatInrCompact(s?.totalFullyLoadedProfit)}
           </div>
         </div>
 
-        {/* FORMULA CALLOUT (BRD SECTION 44) */}
-        <div className="card" style={{ padding: "14px 20px", marginBottom: "1.5rem", background: "#f8fafc", borderLeft: "4px solid #2563eb" }}>
-          <div style={{ fontSize: "0.85rem", lineHeight: "1.5" }}>
-            <b style={{ color: "#1e293b" }}>PehalHealthcare Standard Profitability Formulas (BRD Section 44):</b>
-            <div style={{ marginTop: "4px", color: "#475569" }}>
-              • <b>Net Revenue</b> = Contract Value + Approved CR Value − Discounts − Taxes<br />
-              • <b>Direct Delivery Cost</b> = Employee Cost + Freelancer Cost + Cloud/Infra + Third-Party APIs + Direct Expenses<br />
-              • <b>Contribution Margin</b> = Net Project Revenue − Direct Delivery Cost (Measures Delivery Efficiency)<br />
-              • <b>Fully Loaded Profit</b> = Contribution Margin − Allocated Shared Overheads (Measures Net Company Profit)
-            </div>
+        <div className="p2-kpi-card">
+          <div className="p2-kpi-label">Direct Delivery Cost <WalletCards size={14} color="#d97706" /></div>
+          <div className="p2-kpi-value">{s ? formatInrCompact(s.totalDirectCost) : "—"}</div>
+          <div className="p2-kpi-sub">
+            Overheads: {formatInrCompact(s?.totalSharedOverheads)} · {s?.pendingExpenseApprovals ?? 0} pending
           </div>
         </div>
 
-        {/* PORTFOLIO COMMERCIAL TABLE */}
-        <div className="card">
-          <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <b>Project Commercial Register</b>
-            <span style={{ fontSize: "0.8rem", color: "#64748b" }}>Costing modes: Mode A (Full Costing) · Mode B (Direct) · Mode C (Internal)</span>
+        <div className="p2-kpi-card">
+          <div className="p2-kpi-label">Invoiced / Collected <Receipt size={14} color="#0755e9" /></div>
+          <div className="p2-kpi-value">{s ? formatInrCompact(s.totalInvoiced) : "—"}</div>
+          <div className="p2-kpi-sub">
+            Collected: {formatInrCompact(s?.totalReceived)} ({s?.invoiceCount ?? 0} invoices)
           </div>
+        </div>
 
-          <div className="data-table" style={{ marginTop: "1rem", overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-              <thead>
-                <tr style={{ borderBottom: "2px solid #e2e8f0", fontSize: "0.8rem", color: "#64748b", textTransform: "uppercase" }}>
-                  <th style={{ padding: "12px" }}>Project & Client</th>
-                  <th style={{ padding: "12px" }}>Costing Mode</th>
-                  <th style={{ padding: "12px" }}>Net Revenue</th>
-                  <th style={{ padding: "12px" }}>Direct Cost</th>
-                  <th style={{ padding: "12px" }}>Contribution Margin</th>
-                  <th style={{ padding: "12px" }}>Invoiced / Received</th>
-                  <th style={{ padding: "12px" }}>Receivable</th>
-                  <th style={{ padding: "12px" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading && data.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                      <RefreshCw size={28} className="animate-spin" style={{ margin: "0 auto 8px" }} />
-                      <div>Loading live commercial project financials from API...</div>
-                    </td>
-                  </tr>
-                ) : data.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                      <div>No commercial project data found from API.</div>
-                    </td>
-                  </tr>
-                ) : (
-                  data.map((proj) => (
-                    <tr key={proj.id} style={{ borderBottom: "1px solid #f1f5f9", fontSize: "0.88rem" }}>
-                    <td style={{ padding: "12px" }}>
-                      <span style={{ fontSize: "0.75rem", color: "#2563eb", fontWeight: "bold" }}>{proj.code}</span>
-                      <div style={{ fontWeight: "600", color: "#0f172a" }}>{proj.name}</div>
-                      <small style={{ color: "#64748b" }}>{proj.client}</small>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <span style={{ fontSize: "0.75rem", background: "#f1f5f9", padding: "2px 6px", borderRadius: "4px" }}>
-                        {proj.costingMode}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px", fontWeight: "bold" }}>
-                      {proj.netRevenue > 0 ? formatINR(proj.netRevenue) : "Internal N/A"}
-                    </td>
-                    <td style={{ padding: "12px", color: "#475569" }}>
-                      {formatINR(proj.directCost)}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      {proj.netRevenue > 0 ? (
-                        <div>
-                          <b style={{ color: proj.marginPercent >= 30 ? "#059669" : "#d97706" }}>
-                            {formatINR(proj.contributionMargin)}
-                          </b>
-                          <small style={{ display: "block", color: "#64748b" }}>({proj.marginPercent}%)</small>
-                        </div>
-                      ) : (
-                        <small style={{ color: "#64748b" }}>R&D Effort Only</small>
-                      )}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <div>{formatINR(proj.invoiced)}</div>
-                      <small style={{ color: "#059669" }}>Rec: {formatINR(proj.received)}</small>
-                    </td>
-                    <td style={{ padding: "12px", fontWeight: "bold", color: proj.outstanding > 0 ? "#dc2626" : "#64748b" }}>
-                      {proj.outstanding > 0 ? formatINR(proj.outstanding) : "Nil"}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <button type="button" className="btn outline small" onClick={() => alert(`View Cost Breakdown for ${proj.code}`)}>
-                        Details
-                      </button>
-                    </td>
-                  </tr>
-                )))}
-              </tbody>
-            </table>
+        <div className="p2-kpi-card">
+          <div className="p2-kpi-label">Outstanding Receivables <AlertTriangle size={14} color="#dc2626" /></div>
+          <div className="p2-kpi-value">{s ? formatInrCompact(s.totalOutstanding) : "—"}</div>
+          <div className="p2-kpi-sub" style={{ color: (s?.totalOverdue || 0) > 0 ? "#dc2626" : "#64748b" }}>
+            Overdue: {formatInrCompact(s?.totalOverdue)}
           </div>
         </div>
       </div>
-    </Shell>
+
+      {/* Formula + Aging + Category Spend */}
+      <div className="p2-grid-2">
+        <div className="p2-card">
+          <div className="p2-card-head">
+            <span className="p2-card-title">Receivables Aging Schedule</span>
+            <Link href="/finance/invoices" style={{ fontSize: 11, color: "#0755e9", fontWeight: 600 }}>Manage Invoices →</Link>
+          </div>
+          {[
+            { label: "Current (Not Yet Due)", val: aging?.current || 0, color: "#079b62" },
+            { label: "1–30 Days Overdue", val: aging?.days1_30 || 0, color: "#d97706" },
+            { label: "31–60 Days Overdue", val: aging?.days31_60 || 0, color: "#ea580c" },
+            { label: "60+ Days Overdue", val: aging?.days60Plus || 0, color: "#dc2626" },
+          ].map((b) => (
+            <div key={b.label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                <span>{b.label}</span>
+                <strong>{formatInr(b.val)}</strong>
+              </div>
+              <div className="p2-bar-track">
+                <div className="p2-bar-fill" style={{ width: `${Math.round((b.val / maxAging) * 100)}%`, background: b.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="p2-card">
+          <div className="p2-card-head">
+            <span className="p2-card-title">Direct Cost Breakdown by Category</span>
+            <Link href="/finance/expenses" style={{ fontSize: 11, color: "#0755e9", fontWeight: 600 }}>Expense Ledger →</Link>
+          </div>
+          {data?.costByCategory?.length ? (
+            data.costByCategory.map((c) => {
+              const maxCat = Math.max(1, ...data.costByCategory.map((x) => x.amount));
+              return (
+                <div key={c.category} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                    <span>{c.label}</span>
+                    <strong>{formatInr(c.amount)}</strong>
+                  </div>
+                  <div className="p2-bar-track">
+                    <div className="p2-bar-fill" style={{ width: `${Math.round((c.amount / maxCat) * 100)}%` }} />
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ padding: 18, textAlign: "center", fontSize: 11.5, color: "#64748b", background: "#f8fafc", borderRadius: 8 }}>
+              No project expenses logged yet. Log expenses in the Expense Ledger to populate category burn.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Commercial Register Table */}
+      <div className="p2-card">
+        <div className="p2-card-head">
+          <span className="p2-card-title">Project Commercial &amp; Margin Register ({data?.projectRegister?.length ?? 0})</span>
+          <Link href="/finance/budgets" className="p2-btn p2-btn-primary" style={{ height: 27, fontSize: 11 }}>
+            Configure Budgets
+          </Link>
+        </div>
+        <div className="p2-table-wrap">
+          <table className="p2-table">
+            <thead>
+              <tr>
+                <th>Project &amp; Client</th>
+                <th>Costing Mode</th>
+                <th>Net Revenue</th>
+                <th>Direct Cost</th>
+                <th>Contribution Margin</th>
+                <th>Invoiced / Received</th>
+                <th>Receivable</th>
+                <th style={{ textAlign: "right" }}>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.projectRegister || []).map((row) => (
+                <tr key={row.projectId}>
+                  <td>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#0755e9" }}>{row.code}</div>
+                    <div style={{ fontWeight: 700 }}>{row.name}</div>
+                    <div style={{ fontSize: 10.5, color: "#64748b" }}>{row.client}</div>
+                  </td>
+                  <td><span className="p2-badge p2-badge-slate">{COSTING_LABEL[row.costingMode] || row.costingMode}</span></td>
+                  <td><strong>{row.netRevenue > 0 ? formatInr(row.netRevenue) : "Internal"}</strong></td>
+                  <td>{formatInr(row.directCost)}</td>
+                  <td>
+                    {row.netRevenue > 0 ? (
+                      <>
+                        <strong style={{ color: row.marginPercent >= 30 ? "#079b62" : row.marginPercent >= 15 ? "#d97706" : "#dc2626" }}>
+                          {formatInr(row.contributionMargin)}
+                        </strong>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>{row.marginPercent}% margin</div>
+                      </>
+                    ) : (
+                      <span style={{ color: "#64748b" }}>Internal R&amp;D</span>
+                    )}
+                  </td>
+                  <td>
+                    <div>{formatInr(row.invoiced)}</div>
+                    <div style={{ fontSize: 10, color: "#079b62" }}>Rec: {formatInr(row.received)}</div>
+                  </td>
+                  <td style={{ fontWeight: 700, color: row.outstanding > 0 ? "#dc2626" : "#64748b" }}>
+                    {row.outstanding > 0 ? formatInr(row.outstanding) : "Nil"}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <button type="button" className="p2-btn" style={{ height: 26 }} onClick={() => setDetailRow(row)}>
+                      <Eye size={12} /> Breakdown
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!data?.projectRegister?.length && !loading && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: 24, color: "#64748b" }}>
+                    No active projects found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Live Cost Breakdown Modal (replaces old placeholder alert!) */}
+      {detailRow && (
+        <div className="p2-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="p2-modal" style={{ maxWidth: 540 }}>
+            <div className="p2-modal-head">
+              <strong>P&amp;L Cost Breakdown — {detailRow.code} ({detailRow.name})</strong>
+              <button type="button" className="p2-btn" style={{ height: 26, padding: "0 6px" }} onClick={() => setDetailRow(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="p2-modal-body">
+              <div className="p2-form-grid">
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Contract Value</span>
+                  <strong>{formatInr(detailRow.contractValue)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Approved CR Value</span>
+                  <strong>{formatInr(detailRow.approvedCrValue)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Discounts</span>
+                  <strong>{formatInr(detailRow.discounts)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Net Project Revenue</span>
+                  <strong style={{ color: "#0755e9" }}>{formatInr(detailRow.netRevenue)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Direct Delivery Cost ({detailRow.expenseCount} items)</span>
+                  <strong>{formatInr(detailRow.directCost)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Shared Overheads</span>
+                  <strong>{formatInr(detailRow.sharedOverheads)}</strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Contribution Margin</span>
+                  <strong style={{ color: "#079b62" }}>
+                    {formatInr(detailRow.contributionMargin)} ({detailRow.marginPercent}%)
+                  </strong>
+                </div>
+                <div className="p2-kpi-card">
+                  <span className="p2-kpi-label">Fully Loaded Profit</span>
+                  <strong style={{ color: detailRow.fullyLoadedProfit >= 0 ? "#079b62" : "#dc2626" }}>
+                    {formatInr(detailRow.fullyLoadedProfit)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+            <div className="p2-modal-foot">
+              <Link href="/finance/budgets" className="p2-btn">Edit Budget</Link>
+              <Link href="/finance/invoices" className="p2-btn p2-btn-primary">View Invoices</Link>
+              <button type="button" className="p2-btn" onClick={() => setDetailRow(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

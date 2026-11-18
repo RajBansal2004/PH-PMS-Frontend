@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  Building2,
   CalendarDays,
   Check,
   ChevronDown,
@@ -33,14 +34,22 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { getOrganizationAudit, clients as getClients } from "@/lib/api";
+import {
+  getClientActivities,
+  createClientActivity,
+  deleteClientActivity,
+  clients as getClients,
+} from "@/lib/api";
 import "./client-activity.css";
 
 type ActivityItem = {
-  id: number;
+  id: string;
+  backendId?: string;
   type: string;
   subject: string;
   related: string;
+  clientId?: string;
+  clientName?: string;
   by: string;
   channel: string;
   date: string;
@@ -163,58 +172,63 @@ export default function ClientActivity() {
   const [page, setPage] = useState(1);
   const [detailOpen, setDetailOpen] = useState(true);
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [auditRes, clientsRes] = await Promise.allSettled([
-          getOrganizationAudit({ limit: 50 }),
-          getClients(),
-        ]);
+  const [clientList, setClientList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-        if (clientsRes.status === "fulfilled" && clientsRes.value) {
-          const cList = Array.isArray(clientsRes.value)
-            ? clientsRes.value
-            : (clientsRes.value as any)?.items || [];
-          if (cList.length > 0) {
-            setClientInfo(cList[0]);
-            setFormTo(cList[0].email || "");
-          }
-        }
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [actRes, clientsRes] = await Promise.allSettled([
+        getClientActivities(),
+        getClients(),
+      ]);
 
-        if (auditRes.status === "fulfilled" && auditRes.value) {
-          const list = Array.isArray(auditRes.value)
-            ? auditRes.value
-            : (auditRes.value as any)?.items || [];
-          const mapped: ActivityItem[] = list.map((item: any, i: number) => ({
-            id: i + 1,
-            type: item.action?.toLowerCase().includes("email")
-              ? "Email"
-              : item.action?.toLowerCase().includes("call")
-              ? "Call"
-              : item.action?.toLowerCase().includes("meeting")
-              ? "Meeting"
-              : "Note",
-            subject: item.action || "Client Activity",
-            related: item.module || "Client Management",
-            by: item.performedBy?.name || item.userId?.name || "System",
-            channel: item.channel || "Internal",
-            date: item.createdAt
-              ? new Date(item.createdAt).toLocaleString("en-GB")
-              : "—",
-            status: item.status || "Completed",
-            priority: item.priority || "Normal",
-            message:
-              item.details || item.description || "Activity logged in system.",
-          }));
-          setActivities(mapped);
-          if (mapped.length > 0) {
-            setSelected(mapped[0]);
-          }
+      let cList: any[] = [];
+      if (clientsRes.status === "fulfilled" && clientsRes.value) {
+        cList = Array.isArray(clientsRes.value)
+          ? clientsRes.value
+          : (clientsRes.value as any)?.items || [];
+        setClientList(cList);
+        if (cList.length > 0 && !clientInfo) {
+          setClientInfo(cList[0]);
+          setFormTo(cList[0].email || "");
         }
-      } catch (err) {
-        console.warn("Client activity load error:", err);
       }
+
+      if (actRes.status === "fulfilled" && actRes.value) {
+        const list = Array.isArray(actRes.value)
+          ? actRes.value
+          : (actRes.value as any)?.items || [];
+        const mapped: ActivityItem[] = list.map((item: any, i: number) => ({
+          id: String(item._id || item.id || i + 1),
+          backendId: String(item._id || item.id),
+          type: item.type || "Note",
+          subject: item.subject || "Client Activity",
+          related: item.projectId?.projectName || item.clientId?.displayName || "General",
+          clientId: String(item.clientId?._id || item.clientId || ""),
+          clientName: item.clientId?.displayName || item.clientId?.legalName || "Client",
+          by: item.performedByName || item.performedBy?.name || "Team Member",
+          channel: item.channel || "Internal",
+          date: item.createdAt
+            ? new Date(item.createdAt).toLocaleString("en-GB")
+            : "—",
+          status: item.status || "Completed",
+          priority: item.priority || "Normal",
+          message: item.message || "Activity recorded.",
+        }));
+        setActivities(mapped);
+        if (mapped.length > 0) {
+          setSelected(mapped[0]);
+        }
+      }
+    } catch (err) {
+      console.warn("Client activity load error:", err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadData();
   }, []);
 
@@ -254,28 +268,36 @@ export default function ClientActivity() {
     window.setTimeout(() => setToast(""), 2500);
   }
 
-  function handleCreateActivity() {
+  async function handleCreateActivity() {
     if (!formSubject.trim()) {
       notify("Please enter a subject");
       return;
     }
-    const item: ActivityItem = {
-      id: activities.length + 1,
-      type: formType,
-      subject: formSubject,
-      related: formRelated,
-      by: "Current User",
-      channel: formType === "Email" ? "Email" : "Manual Log",
-      date: new Date().toLocaleString("en-GB"),
-      status: "Sent",
-      priority: formPriority,
-      message: formMessage || "Logged by user.",
-    };
-    setActivities((prev) => [item, ...prev]);
-    setSelected(item);
-    setFormSubject("");
-    setFormMessage("");
-    notify("Activity logged successfully");
+
+    const clientId = clientInfo?._id || clientInfo?.id;
+    if (!clientId) {
+      notify("Please select a client to log activity");
+      return;
+    }
+
+    try {
+      await createClientActivity({
+        clientId,
+        type: formType,
+        subject: formSubject.trim(),
+        channel: formType === "Email" ? "Email" : formType === "WhatsApp" ? "WhatsApp" : formType === "Call" ? "Phone" : "Internal",
+        priority: formPriority,
+        message: formMessage.trim() || `Client activity: ${formSubject}`,
+        status: "Completed",
+      });
+
+      setFormSubject("");
+      setFormMessage("");
+      notify("Activity logged successfully to database.");
+      await loadData();
+    } catch (err: any) {
+      notify(err?.message || "Failed to log activity to API.");
+    }
   }
 
   return (
@@ -312,7 +334,13 @@ export default function ClientActivity() {
       </div>
 
       <div className="ca-client-card">
-        <div className="ca-client-logo">✚</div>
+        <div className="ca-client-logo">
+          {clientInfo?.logo ? (
+            <img src={clientInfo.logo} alt="Client Logo" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 8 }} />
+          ) : (
+            <Building2 size={20} />
+          )}
+        </div>
         <div className="ca-client-info">
           <h2>
             {clientInfo?.name || "Client Details"}{" "}

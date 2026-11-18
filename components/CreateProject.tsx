@@ -4,18 +4,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  CalendarDays,
+  AlertCircle,
   Check,
   ChevronRight,
-  Cloud,
-  GitBranch,
   Loader2,
-  Rocket,
   Save,
-  Users,
-  WalletCards,
 } from "lucide-react";
-import { clients, createProject, employees } from "../lib/api";
+import {
+  clients as getClients,
+  createProject,
+  employees as getEmployees,
+  getNextProjectCode,
+  projects as getProjects,
+} from "../lib/api";
 
 const steps = [
   "Identity",
@@ -32,132 +33,207 @@ export function CreateProject() {
   const params = useSearchParams();
   const router = useRouter();
   const step = Math.max(1, Math.min(8, Number(params.get("step") || 1)));
-  const go = (n: number) => router.push(`/projects/new?step=${n}`);
 
-  const [clientList, setClientList] = useState<any[]>([]);
-  const [employeeList, setEmployeeList] = useState<any[]>([]);
-  const [loadingOptions, setLoadingOptions] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
+  const [totalProjectsCount, setTotalProjectsCount] = useState<number>(10);
+  const [autoProjectCode, setAutoProjectCode] = useState<string>("PRJ-00011");
 
-  const [form, setForm] = useState({
-    clientId: "",
-    projectName: "",
-    projectCode: `PRJ-${String(Math.floor(1000 + Math.random() * 9000))}`,
-    projectCategory: "Implementation",
-    description: "",
-    projectManagerId: "",
-    technicalLeadId: "",
-    qaLeadId: "",
-    businessAnalystId: "",
-    startDate: "",
-    targetCompletion: "",
-    actualStart: "",
-    targetRelease: "",
-    contractType: "Fixed Price",
-    budget: "",
-    currency: "INR",
-    billingType: "Milestone Based",
-    estimatedHours: "",
-    frontend: "",
-    backend: "",
-    database: "",
-    cloud: "",
-    repository: "",
-    priority: "HIGH",
-    riskLevel: "MEDIUM",
-    status: "PLANNED",
-    approvalWorkflow: "Standard Project Approval",
+  // Form values initialized clean (NO dummy text autofill, auto project code pre-populated)
+  const [formData, setFormData] = useState<Record<string, string>>({
+    Client: "",
+    "Project Name": "",
+    "Project Code": "PRJ-00011",
+    "Project Type": "",
+    Description: "",
+    "Project Manager": "",
+    "Technical Lead": "",
+    "QA Lead": "",
+    "Business Analyst": "",
+    "Planned Start": "",
+    "Planned End": "",
+    "Actual Start": "",
+    "Target Release": "",
+    "Contract Type": "Fixed Price",
+    Budget: "",
+    Currency: "INR",
+    "Billing Type": "Milestone Based",
+    "Estimated Hours": "",
+    Frontend: "",
+    Backend: "",
+    Database: "",
+    Cloud: "",
+    Repository: "",
+    Priority: "High",
+    "Risk Level": "Medium",
+    Status: "Planned",
+    "Approval Workflow": "Standard Project Approval",
   });
 
-  const [teamMembers, setTeamMembers] = useState<{ employeeId: string; allocationPercentage: number }[]>([]);
+  const [clientOptions, setClientOptions] = useState<any[]>([]);
+  const [employeeOptions, setEmployeeOptions] = useState<any[]>([]);
+  const [teamList, setTeamList] = useState<
+    Array<{ name: string; role: string; alloc: string }>
+  >([]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [submitSuccess, setSubmitSuccess] = useState("");
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [cData, eData] = await Promise.all([
-          clients().catch(() => []),
-          employees().catch(() => []),
-        ]);
-        setClientList(Array.isArray(cData) ? cData : []);
-        setEmployeeList(Array.isArray(eData) ? eData : []);
-        if (Array.isArray(cData) && cData.length > 0) {
-          setForm((prev) => ({ ...prev, clientId: prev.clientId || cData[0]._id || cData[0].id || "" }));
+    let mounted = true;
+    Promise.all([
+      getClients().catch(() => []),
+      getEmployees().catch(() => []),
+      getNextProjectCode().catch(() => null),
+      getProjects({ limit: 100 }).catch(() => null),
+    ]).then(([cList, eList, nextCodeRes, pRes]) => {
+      if (!mounted) return;
+      const cls = Array.isArray(cList) ? cList : (cList as any)?.items || [];
+      const emps = Array.isArray(eList) ? eList : (eList as any)?.items || [];
+      setClientOptions(cls);
+      setEmployeeOptions(emps);
+
+      let total = 10;
+      let code = "PRJ-00011";
+
+      if (nextCodeRes?.nextCode) {
+        code = nextCodeRes.nextCode;
+        total = Number(nextCodeRes.totalProjects) || 10;
+      } else if (pRes) {
+        const pItems: any[] = (pRes as any)?.items || [];
+        total = Number((pRes as any)?.pagination?.total) || pItems.length;
+        const codes = new Set(
+          pItems.map((p: any) => String(p.projectCode || "").toUpperCase())
+        );
+        let nextNum = Math.max(1, total + 1);
+        while (codes.has(`PRJ-${String(nextNum).padStart(5, "0")}`)) {
+          nextNum++;
         }
-      } catch (err) {
-        console.warn("Failed to load options:", err);
-      } finally {
-        setLoadingOptions(false);
+        code = `PRJ-${String(nextNum).padStart(5, "0")}`;
       }
-    }
-    loadData();
+
+      setTotalProjectsCount(total);
+      setAutoProjectCode(code);
+      setFormData((prev) => ({
+        ...prev,
+        "Project Code": prev["Project Code"] === "PRJ-00011" || !prev["Project Code"] ? code : prev["Project Code"],
+      }));
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const update = (key: string, value: any) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setErrorMsg("");
+  const go = (n: number) => {
+    setSubmitError("");
+    router.push(`/projects/new?step=${n}`);
   };
 
-  const handleCreate = async () => {
-    if (!form.projectName.trim()) {
-      setErrorMsg("Project name is required.");
-      go(1);
-      return;
-    }
-    if (!form.clientId) {
-      setErrorMsg("Please select a client.");
-      go(1);
-      return;
-    }
+  const updateField = (name: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
+  const selectedClient = clientOptions.find(
+    (c) =>
+      String(c._id || c.id) === String(formData["Client"]) ||
+      c.displayName === formData["Client"] ||
+      c.legalName === formData["Client"] ||
+      c.clientCode === formData["Client"]
+  );
+
+  const handleSave = async (overrideStatus?: string) => {
     setSubmitting(true);
-    setErrorMsg("");
+    setSubmitError("");
+    setSubmitSuccess("");
+
     try {
-      const payload: any = {
-        clientId: form.clientId,
-        projectName: form.projectName.trim(),
-        projectCode: form.projectCode.trim().toUpperCase(),
-        projectCategory: form.projectCategory,
-        description: form.description || null,
-        projectManagerId: form.projectManagerId || null,
-        technicalLeadId: form.technicalLeadId || null,
-        qaLeadId: form.qaLeadId || null,
-        businessAnalystId: form.businessAnalystId || null,
-        startDate: form.startDate ? new Date(form.startDate).toISOString() : null,
-        targetCompletion: form.targetCompletion ? new Date(form.targetCompletion).toISOString() : null,
-        targetRelease: form.targetRelease ? new Date(form.targetRelease).toISOString() : null,
-        contractType: form.contractType || null,
-        budget: form.budget ? Number(form.budget.replace(/[^0-9.]/g, "")) : null,
-        currency: form.currency || "INR",
-        billingType: form.billingType || null,
-        estimatedHours: form.estimatedHours ? Number(form.estimatedHours) : null,
-        frontend: form.frontend || null,
-        backend: form.backend || null,
-        database: form.database || null,
-        cloud: form.cloud || null,
-        repository: form.repository || null,
-        technology: [form.frontend, form.backend, form.database, form.cloud].filter(Boolean),
-        priority: form.priority,
-        riskLevel: form.riskLevel,
-        status: form.status,
+      const name = formData["Project Name"]?.trim();
+      if (!name) {
+        go(1);
+        throw new Error("Project Name is required.");
+      }
+
+      const findEmpId = (val?: string) => {
+        if (!val) return undefined;
+        const emp = employeeOptions.find(
+          (e) =>
+            String(e._id || e.id) === String(val) ||
+            e.displayName === val ||
+            `${e.firstName || ""} ${e.lastName || ""}`.trim() === val ||
+            e.name === val ||
+            e.employeeCode === val
+        );
+        return emp ? (emp._id || emp.id) : undefined;
       };
 
+      const start = formData["Planned Start"];
+      const end = formData["Planned End"];
+      if (start && end && new Date(end) < new Date(start)) {
+        go(3);
+        throw new Error("Planned End date cannot be before Planned Start date.");
+      }
+
+      const budgetNum = Number(String(formData["Budget"]).replace(/[^0-9.]/g, "")) || 0;
+      const hoursNum = Number(String(formData["Estimated Hours"]).replace(/[^0-9.]/g, "")) || 0;
+
+      const code = (
+        formData["Project Code"]?.trim() ||
+        autoProjectCode ||
+        `PRJ-${String(totalProjectsCount + 1).padStart(5, "0")}`
+      ).toUpperCase();
+
+      const payload: any = {
+        projectName: name,
+        projectCode: code,
+        projectCategory: formData["Project Type"] || "Construction & Civil",
+        description: formData["Description"]?.trim() || undefined,
+        status: overrideStatus || (formData["Status"] === "Draft" ? "DRAFT" : "ACTIVE"),
+        priority: (formData["Priority"] || "HIGH").toUpperCase(),
+        riskLevel: (formData["Risk Level"] || "MEDIUM").toUpperCase(),
+        contractType: formData["Contract Type"] || "Fixed Price",
+        billingType: formData["Billing Type"] || "Milestone Based",
+        currency: formData["Currency"] || "INR",
+        budget: budgetNum,
+        estimatedHours: hoursNum,
+      };
+
+      if (selectedClient?._id || selectedClient?.id) {
+        payload.clientId = selectedClient._id || selectedClient.id;
+      }
+      const pmId = findEmpId(formData["Project Manager"]);
+      if (pmId) payload.projectManagerId = pmId;
+
+      const tlId = findEmpId(formData["Technical Lead"]);
+      if (tlId) payload.technicalLeadId = tlId;
+
+      const qaId = findEmpId(formData["QA Lead"]);
+      if (qaId) payload.qaLeadId = qaId;
+
+      const baId = findEmpId(formData["Business Analyst"]);
+      if (baId) payload.businessAnalystId = baId;
+
+      if (start) payload.startDate = start;
+      if (end) payload.targetCompletion = end;
+      if (formData["Actual Start"]) payload.actualCompletion = formData["Actual Start"];
+      if (formData["Target Release"]) payload.targetRelease = formData["Target Release"];
+      if (formData["Frontend"]) payload.frontend = formData["Frontend"];
+      if (formData["Backend"]) payload.backend = formData["Backend"];
+      if (formData["Database"]) payload.database = formData["Database"];
+      if (formData["Cloud"]) payload.cloud = formData["Cloud"];
+      if (formData["Repository"]) payload.repository = formData["Repository"];
+
       await createProject(payload);
-      setSuccessMsg("Project created successfully!");
+
+      setSubmitSuccess(`Project "${name}" (${code}) created successfully!`);
       setTimeout(() => {
         router.push("/projects");
       }, 1200);
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to create project. Please verify all inputs.");
+      console.error("Project creation error:", err);
+      setSubmitError(err?.message || "Failed to create project. Please verify the entered details.");
     } finally {
       setSubmitting(false);
     }
   };
-
-  const selectedClient = clientList.find(
-    (c) => (c._id || c.id) === form.clientId
-  );
 
   return (
     <div>
@@ -165,7 +241,7 @@ export function CreateProject() {
         <div>
           <div className="eyebrow">PROJECTS / CREATE</div>
           <h1>
-            Create New Project <span>(PRJ-002)</span>
+            Create New Project <span>({formData["Project Code"] || autoProjectCode})</span>
           </h1>
           <p>Configure a project through a controlled, approval-ready workflow.</p>
         </div>
@@ -174,21 +250,11 @@ export function CreateProject() {
         </Link>
       </div>
 
-      {errorMsg && (
-        <div style={{ padding: "12px 16px", background: "#fee2e2", color: "#991b1b", borderRadius: 8, marginBottom: 16 }}>
-          {errorMsg}
-        </div>
-      )}
-      {successMsg && (
-        <div style={{ padding: "12px 16px", background: "#dcfce7", color: "#166534", borderRadius: 8, marginBottom: 16 }}>
-          {successMsg}
-        </div>
-      )}
-
       <div className="stepper card">
         {steps.map((s, i) => (
           <button
             key={s}
+            type="button"
             onClick={() => go(i + 1)}
             className={step === i + 1 ? "active" : step > i + 1 ? "done" : ""}
           >
@@ -198,6 +264,48 @@ export function CreateProject() {
         ))}
       </div>
 
+      {submitError && (
+        <div
+          style={{
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            color: "#b91c1c",
+            padding: "10px 14px",
+            borderRadius: 6,
+            marginTop: 10,
+            marginBottom: 6,
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <AlertCircle size={15} />
+          <span>{submitError}</span>
+        </div>
+      )}
+
+      {submitSuccess && (
+        <div
+          style={{
+            background: "#f0fdf4",
+            border: "1px solid #bbf7d0",
+            color: "#15803d",
+            padding: "10px 14px",
+            borderRadius: 6,
+            marginTop: 10,
+            marginBottom: 6,
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Check size={15} />
+          <span>{submitSuccess}</span>
+        </div>
+      )}
+
       <div className="create-layout">
         <section className="card create-main">
           <div className="section-head">
@@ -205,30 +313,38 @@ export function CreateProject() {
               <div className="eyebrow">STEP {step} OF 8</div>
               <h2>{steps[step - 1]}</h2>
               <p>
-                {step === 1 && "Provide basic identity information about the project."}
-                {step === 2 && "Assign key ownership roles for the project."}
-                {step === 3 && "Define project schedule and important target dates."}
-                {step === 4 && "Configure commercial details and budget information."}
-                {step === 5 && "Select technology stack and development tools."}
-                {step === 6 && "Configure governance, priority and approval settings."}
-                {step === 7 && "Define project team members and access settings."}
-                {step === 8 && "Review all details before creating the project."}
+                {step === 1
+                  ? "Provide basic identity information about the project."
+                  : step === 2
+                  ? "Assign key ownership roles for the project."
+                  : step === 3
+                  ? "Define project schedule and important target dates."
+                  : step === 4
+                  ? "Configure commercial details and budget information."
+                  : step === 5
+                  ? "Select technology stack and development tools."
+                  : step === 6
+                  ? "Configure governance, priority and approval settings."
+                  : step === 7
+                  ? "Define project team members and access settings."
+                  : "Review all details before creating the project."}
               </p>
             </div>
           </div>
 
+          {/* STEP 1: IDENTITY */}
           {step === 1 && (
             <div className="form-grid create-form">
               <label>
                 Client <b>*</b>
                 <select
-                  value={form.clientId}
-                  onChange={(e) => update("clientId", e.target.value)}
+                  value={formData["Client"] || ""}
+                  onChange={(e) => updateField("Client", e.target.value)}
                 >
-                  <option value="">-- Select Client --</option>
-                  {clientList.map((c) => (
+                  <option value="">Select Client</option>
+                  {clientOptions.map((c) => (
                     <option key={c._id || c.id} value={c._id || c.id}>
-                      {c.displayName || c.legalName || c.name || "Client"}
+                      {c.displayName || c.legalName} ({c.clientCode || "CLT"})
                     </option>
                   ))}
                 </select>
@@ -237,58 +353,65 @@ export function CreateProject() {
               <label>
                 Project Name <b>*</b>
                 <input
-                  value={form.projectName}
-                  onChange={(e) => update("projectName", e.target.value)}
-                  placeholder="e.g. AI-CMS Implementation"
+                  type="text"
+                  placeholder="Enter Project Name"
+                  value={formData["Project Name"] || ""}
+                  onChange={(e) => updateField("Project Name", e.target.value)}
                 />
               </label>
 
               <label>
                 Project Code <b>*</b>
                 <input
-                  value={form.projectCode}
-                  onChange={(e) => update("projectCode", e.target.value.toUpperCase())}
-                  placeholder="e.g. PRJ-00075"
+                  type="text"
+                  placeholder="e.g. PRJ-00011"
+                  value={formData["Project Code"] || autoProjectCode}
+                  onChange={(e) => updateField("Project Code", e.target.value.toUpperCase())}
                 />
               </label>
 
               <label>
                 Project Type <b>*</b>
                 <select
-                  value={form.projectCategory}
-                  onChange={(e) => update("projectCategory", e.target.value)}
+                  value={formData["Project Type"] || ""}
+                  onChange={(e) => updateField("Project Type", e.target.value)}
                 >
+                  <option value="">Select Project Type</option>
                   <option value="Implementation">Implementation</option>
-                  <option value="Custom Development">Custom Development</option>
-                  <option value="Integration">Integration</option>
-                  <option value="Maintenance">Maintenance</option>
-                  <option value="R&D">R&D</option>
+                  <option value="Construction & Civil">Construction & Civil</option>
+                  <option value="Residential High-Rise">Residential High-Rise</option>
+                  <option value="Commercial & Retail">Commercial & Retail</option>
+                  <option value="Turnkey Infrastructure">Turnkey Infrastructure</option>
+                  <option value="Consulting & Architecture">Consulting & Architecture</option>
+                  <option value="Facility Management">Facility Management</option>
                 </select>
               </label>
 
               <label className="span-2">
                 Description
                 <textarea
-                  value={form.description}
-                  onChange={(e) => update("description", e.target.value)}
-                  placeholder="Provide project summary, business scope and core objectives..."
+                  rows={3}
+                  placeholder="Enter project description..."
+                  value={formData["Description"] || ""}
+                  onChange={(e) => updateField("Description", e.target.value)}
                 />
               </label>
             </div>
           )}
 
+          {/* STEP 2: OWNERSHIP */}
           {step === 2 && (
             <div className="form-grid create-form">
               <label>
-                Project Manager
+                Project Manager <b>*</b>
                 <select
-                  value={form.projectManagerId}
-                  onChange={(e) => update("projectManagerId", e.target.value)}
+                  value={formData["Project Manager"] || ""}
+                  onChange={(e) => updateField("Project Manager", e.target.value)}
                 >
-                  <option value="">-- Select Project Manager --</option>
-                  {employeeList.map((emp) => (
-                    <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                      {emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email}
+                  <option value="">Select Project Manager</option>
+                  {employeeOptions.map((e) => (
+                    <option key={e._id || e.id} value={e._id || e.id}>
+                      {e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim()} ({e.employeeCode || "EMP"})
                     </option>
                   ))}
                 </select>
@@ -297,13 +420,13 @@ export function CreateProject() {
               <label>
                 Technical Lead
                 <select
-                  value={form.technicalLeadId}
-                  onChange={(e) => update("technicalLeadId", e.target.value)}
+                  value={formData["Technical Lead"] || ""}
+                  onChange={(e) => updateField("Technical Lead", e.target.value)}
                 >
-                  <option value="">-- Select Technical Lead --</option>
-                  {employeeList.map((emp) => (
-                    <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                      {emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email}
+                  <option value="">Select Technical Lead</option>
+                  {employeeOptions.map((e) => (
+                    <option key={e._id || e.id} value={e._id || e.id}>
+                      {e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim()} ({e.employeeCode || "EMP"})
                     </option>
                   ))}
                 </select>
@@ -312,13 +435,13 @@ export function CreateProject() {
               <label>
                 QA Lead
                 <select
-                  value={form.qaLeadId}
-                  onChange={(e) => update("qaLeadId", e.target.value)}
+                  value={formData["QA Lead"] || ""}
+                  onChange={(e) => updateField("QA Lead", e.target.value)}
                 >
-                  <option value="">-- Select QA Lead --</option>
-                  {employeeList.map((emp) => (
-                    <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                      {emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email}
+                  <option value="">Select QA Lead</option>
+                  {employeeOptions.map((e) => (
+                    <option key={e._id || e.id} value={e._id || e.id}>
+                      {e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim()} ({e.employeeCode || "EMP"})
                     </option>
                   ))}
                 </select>
@@ -327,13 +450,13 @@ export function CreateProject() {
               <label>
                 Business Analyst
                 <select
-                  value={form.businessAnalystId}
-                  onChange={(e) => update("businessAnalystId", e.target.value)}
+                  value={formData["Business Analyst"] || ""}
+                  onChange={(e) => updateField("Business Analyst", e.target.value)}
                 >
-                  <option value="">-- Select Business Analyst --</option>
-                  {employeeList.map((emp) => (
-                    <option key={emp._id || emp.id} value={emp._id || emp.id}>
-                      {emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email}
+                  <option value="">Select Business Analyst</option>
+                  {employeeOptions.map((e) => (
+                    <option key={e._id || e.id} value={e._id || e.id}>
+                      {e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim()} ({e.employeeCode || "EMP"})
                     </option>
                   ))}
                 </select>
@@ -341,14 +464,15 @@ export function CreateProject() {
             </div>
           )}
 
+          {/* STEP 3: TIMELINE */}
           {step === 3 && (
             <div className="form-grid create-form">
               <label>
                 Planned Start <b>*</b>
                 <input
                   type="date"
-                  value={form.startDate}
-                  onChange={(e) => update("startDate", e.target.value)}
+                  value={formData["Planned Start"] || ""}
+                  onChange={(e) => updateField("Planned Start", e.target.value)}
                 />
               </label>
 
@@ -356,8 +480,8 @@ export function CreateProject() {
                 Planned End <b>*</b>
                 <input
                   type="date"
-                  value={form.targetCompletion}
-                  onChange={(e) => update("targetCompletion", e.target.value)}
+                  value={formData["Planned End"] || ""}
+                  onChange={(e) => updateField("Planned End", e.target.value)}
                 />
               </label>
 
@@ -365,8 +489,8 @@ export function CreateProject() {
                 Actual Start
                 <input
                   type="date"
-                  value={form.actualStart}
-                  onChange={(e) => update("actualStart", e.target.value)}
+                  value={formData["Actual Start"] || ""}
+                  onChange={(e) => updateField("Actual Start", e.target.value)}
                 />
               </label>
 
@@ -374,221 +498,226 @@ export function CreateProject() {
                 Target Release
                 <input
                   type="date"
-                  value={form.targetRelease}
-                  onChange={(e) => update("targetRelease", e.target.value)}
+                  value={formData["Target Release"] || ""}
+                  onChange={(e) => updateField("Target Release", e.target.value)}
                 />
               </label>
             </div>
           )}
 
+          {/* STEP 4: COMMERCIAL */}
           {step === 4 && (
             <div className="form-grid create-form">
               <label>
                 Contract Type <b>*</b>
                 <select
-                  value={form.contractType}
-                  onChange={(e) => update("contractType", e.target.value)}
+                  value={formData["Contract Type"] || "Fixed Price"}
+                  onChange={(e) => updateField("Contract Type", e.target.value)}
                 >
                   <option value="Fixed Price">Fixed Price</option>
+                  <option value="Item Rate / BOQ">Item Rate / BOQ</option>
+                  <option value="EPC / Turnkey">EPC / Turnkey</option>
+                  <option value="Cost Plus Fee">Cost Plus Fee</option>
+                  <option value="Milestone Based">Milestone Based</option>
                   <option value="Time & Material">Time & Material</option>
-                  <option value="Dedicated Team">Dedicated Team</option>
-                  <option value="Retainer">Retainer</option>
                 </select>
               </label>
 
               <label>
-                Budget Amount <b>*</b>
+                Budget <b>*</b>
                 <input
-                  value={form.budget}
-                  onChange={(e) => update("budget", e.target.value)}
-                  placeholder="e.g. 2500000"
+                  type="number"
+                  placeholder="Enter budget (e.g. 2640000)"
+                  value={formData["Budget"] || ""}
+                  onChange={(e) => updateField("Budget", e.target.value)}
                 />
               </label>
 
               <label>
                 Currency
                 <select
-                  value={form.currency}
-                  onChange={(e) => update("currency", e.target.value)}
+                  value={formData["Currency"] || "INR"}
+                  onChange={(e) => updateField("Currency", e.target.value)}
                 >
                   <option value="INR">INR - Indian Rupee (₹)</option>
                   <option value="USD">USD - US Dollar ($)</option>
                   <option value="EUR">EUR - Euro (€)</option>
-                  <option value="GBP">GBP - British Pound (£)</option>
+                  <option value="AED">AED - UAE Dirham</option>
                 </select>
               </label>
 
               <label>
                 Billing Type
                 <select
-                  value={form.billingType}
-                  onChange={(e) => update("billingType", e.target.value)}
+                  value={formData["Billing Type"] || "Milestone Based"}
+                  onChange={(e) => updateField("Billing Type", e.target.value)}
                 >
                   <option value="Milestone Based">Milestone Based</option>
-                  <option value="Monthly Retainer">Monthly Retainer</option>
-                  <option value="Hourly Bi-Weekly">Hourly Bi-Weekly</option>
+                  <option value="Monthly Progress / RA Billing">Monthly Progress / RA Billing</option>
+                  <option value="Advance & Retention">Advance & Retention</option>
+                  <option value="Time & Material">Time & Material</option>
                 </select>
               </label>
 
               <label>
                 Estimated Hours
                 <input
-                  value={form.estimatedHours}
-                  onChange={(e) => update("estimatedHours", e.target.value)}
-                  placeholder="e.g. 2400"
+                  type="number"
+                  placeholder="e.g. 2450"
+                  value={formData["Estimated Hours"] || ""}
+                  onChange={(e) => updateField("Estimated Hours", e.target.value)}
                 />
               </label>
             </div>
           )}
 
+          {/* STEP 5: TECHNOLOGY */}
           {step === 5 && (
             <div className="form-grid create-form">
               <label>
                 Frontend
                 <input
-                  value={form.frontend}
-                  onChange={(e) => update("frontend", e.target.value)}
-                  placeholder="e.g. Next.js, React"
+                  type="text"
+                  placeholder="e.g. React.js"
+                  value={formData["Frontend"] || ""}
+                  onChange={(e) => updateField("Frontend", e.target.value)}
                 />
               </label>
 
               <label>
                 Backend
                 <input
-                  value={form.backend}
-                  onChange={(e) => update("backend", e.target.value)}
-                  placeholder="e.g. Node.js, Express"
+                  type="text"
+                  placeholder="e.g. Node.js"
+                  value={formData["Backend"] || ""}
+                  onChange={(e) => updateField("Backend", e.target.value)}
                 />
               </label>
 
               <label>
                 Database
                 <input
-                  value={form.database}
-                  onChange={(e) => update("database", e.target.value)}
-                  placeholder="e.g. MongoDB, PostgreSQL"
+                  type="text"
+                  placeholder="e.g. PostgreSQL"
+                  value={formData["Database"] || ""}
+                  onChange={(e) => updateField("Database", e.target.value)}
                 />
               </label>
 
               <label>
-                Cloud / Infrastructure
+                Cloud
                 <input
-                  value={form.cloud}
-                  onChange={(e) => update("cloud", e.target.value)}
-                  placeholder="e.g. AWS, Azure, GCP"
+                  type="text"
+                  placeholder="e.g. AWS (Amazon Web Services)"
+                  value={formData["Cloud"] || ""}
+                  onChange={(e) => updateField("Cloud", e.target.value)}
                 />
               </label>
 
               <label className="span-2">
-                Git Repository
+                Repository
                 <input
-                  value={form.repository}
-                  onChange={(e) => update("repository", e.target.value)}
-                  placeholder="e.g. https://github.com/pehalhealth/ai-cms"
+                  type="text"
+                  placeholder="e.g. GitHub @pehalhealth/ai-cms"
+                  value={formData["Repository"] || ""}
+                  onChange={(e) => updateField("Repository", e.target.value)}
                 />
               </label>
             </div>
           )}
 
+          {/* STEP 6: GOVERNANCE */}
           {step === 6 && (
             <div className="form-grid create-form">
               <label>
                 Priority
                 <select
-                  value={form.priority}
-                  onChange={(e) => update("priority", e.target.value)}
+                  value={formData["Priority"] || "High"}
+                  onChange={(e) => updateField("Priority", e.target.value)}
                 >
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                  <option value="Critical">Critical</option>
                 </select>
               </label>
 
               <label>
                 Risk Level
                 <select
-                  value={form.riskLevel}
-                  onChange={(e) => update("riskLevel", e.target.value)}
+                  value={formData["Risk Level"] || "Medium"}
+                  onChange={(e) => updateField("Risk Level", e.target.value)}
                 >
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                  <option value="Critical">Critical</option>
                 </select>
               </label>
 
               <label>
                 Status
                 <select
-                  value={form.status}
-                  onChange={(e) => update("status", e.target.value)}
+                  value={formData["Status"] || "Planned"}
+                  onChange={(e) => updateField("Status", e.target.value)}
                 >
-                  <option value="PLANNED">Planned</option>
-                  <option value="ACTIVE">Active</option>
-                  <option value="ON_HOLD">On Hold</option>
-                  <option value="COMPLETED">Completed</option>
+                  <option value="Planned">Planned</option>
+                  <option value="Active">Active</option>
+                  <option value="Draft">Draft</option>
+                  <option value="Pending Approval">Pending Approval</option>
                 </select>
               </label>
 
               <label>
                 Approval Workflow
-                <input
-                  value={form.approvalWorkflow}
-                  onChange={(e) => update("approvalWorkflow", e.target.value)}
-                />
+                <select
+                  value={formData["Approval Workflow"] || "Standard Project Approval"}
+                  onChange={(e) => updateField("Approval Workflow", e.target.value)}
+                >
+                  <option value="Standard Project Approval">Standard Project Approval</option>
+                  <option value="Executive Committee Approval">Executive Committee Approval</option>
+                  <option value="Fast-track Approval">Fast-track Approval</option>
+                </select>
               </label>
             </div>
           )}
 
+          {/* STEP 7: TEAM & ACCESS */}
           {step === 7 && (
-            <div className="member-table">
-              <p style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 12 }}>
-                Team assignments can be configured here or refined later in the Project Team workspace.
-              </p>
-              {employeeList.slice(0, 4).map((emp, i) => (
-                <div key={emp._id || emp.id}>
-                  <b>{emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || emp.email}</b>
-                  <span>{emp.designation?.name || "Team Member"}</span>
-                  <input defaultValue="100%" />
-                </div>
-              ))}
-            </div>
+            <TeamStep
+              employeeOptions={employeeOptions}
+              teamList={teamList}
+              setTeamList={setTeamList}
+            />
           )}
 
+          {/* STEP 8: REVIEW & APPROVAL */}
           {step === 8 && (
-            <div className="review-grid">
-              <div className="card" style={{ padding: 16 }}>
-                <div className="section-head">
-                  <b>Identity & Scope</b>
-                  <a onClick={() => go(1)} style={{ cursor: "pointer", color: "#2563eb" }}>Edit</a>
-                </div>
-                <p>Client: <strong>{selectedClient?.displayName || selectedClient?.legalName || "Not selected"}</strong></p>
-                <p>Project: <strong>{form.projectName || "Not specified"}</strong> ({form.projectCode})</p>
-                <p>Category: <strong>{form.projectCategory}</strong></p>
-              </div>
-
-              <div className="card" style={{ padding: 16 }}>
-                <div className="section-head">
-                  <b>Commercial & Schedule</b>
-                  <a onClick={() => go(3)} style={{ cursor: "pointer", color: "#2563eb" }}>Edit</a>
-                </div>
-                <p>Timeline: <strong>{form.startDate || "TBD"}</strong> to <strong>{form.targetCompletion || "TBD"}</strong></p>
-                <p>Budget: <strong>{form.budget ? `${form.currency} ${form.budget}` : "Not set"}</strong></p>
-                <p>Status: <strong>{form.status}</strong></p>
-              </div>
-            </div>
+            <ReviewStep
+              formData={formData}
+              clientOptions={clientOptions}
+              autoProjectCode={autoProjectCode}
+              go={go}
+            />
           )}
 
           <div className="create-actions">
             <button
               className="btn outline"
               type="button"
-              disabled={step === 1 || submitting}
+              disabled={submitting}
               onClick={() => step > 1 && go(step - 1)}
             >
               ← Back
             </button>
-
+            <button
+              className="btn outline"
+              type="button"
+              disabled={submitting}
+              onClick={() => handleSave("DRAFT")}
+            >
+              <Save size={14} /> Save Draft
+            </button>
             {step < 8 ? (
               <button
                 className="btn primary"
@@ -602,11 +731,11 @@ export function CreateProject() {
                 className="btn success"
                 type="button"
                 disabled={submitting}
-                onClick={handleCreate}
+                onClick={() => handleSave("ACTIVE")}
               >
                 {submitting ? (
                   <>
-                    <Loader2 size={15} className="spin" /> Creating...
+                    <Loader2 size={13} className="spin" /> Creating...
                   </>
                 ) : (
                   "✓ Create Project"
@@ -620,27 +749,205 @@ export function CreateProject() {
           <b>Quick Info</b>
           <div>
             <span>Project Code</span>
-            <strong>{form.projectCode || "—"}</strong>
+            <strong>{formData["Project Code"] || autoProjectCode}</strong>
           </div>
           <div>
             <span>Client</span>
-            <strong>{selectedClient?.displayName || selectedClient?.legalName || "—"}</strong>
+            <strong>{selectedClient?.displayName || selectedClient?.legalName || formData["Client"] || "—"}</strong>
           </div>
           <div>
             <span>Project Type</span>
-            <strong>{form.projectCategory || "—"}</strong>
+            <strong>{formData["Project Type"] || "—"}</strong>
           </div>
           <div>
             <span>Status</span>
-            <span className="status amber">{form.status}</span>
+            <StatusP>{formData["Status"] || "Draft"}</StatusP>
+          </div>
+          <div>
+            <span>Created By</span>
+            <strong>PH PMS Admin</strong>
+          </div>
+          <div>
+            <span>Target End</span>
+            <strong>{formData["Planned End"] || "—"}</strong>
           </div>
           <div className="tips">
             <b>Helpful Tips</b>
             <p>• All required fields are marked with *.</p>
-            <p>• Project code is auto-formatted and unique.</p>
-            <p>• Connects directly to backend database on submit.</p>
+            <p>• Project code is auto-generated ({totalProjectsCount} existing projects).</p>
+            <p>• You can save this project as draft.</p>
           </div>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function StatusP({ children }: { children: React.ReactNode }) {
+  return <span className="status amber">{children}</span>;
+}
+
+function TeamStep({
+  employeeOptions,
+  teamList,
+  setTeamList,
+}: {
+  employeeOptions: any[];
+  teamList: Array<{ name: string; role: string; alloc: string }>;
+  setTeamList: React.Dispatch<
+    React.SetStateAction<Array<{ name: string; role: string; alloc: string }>>
+  >;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const defaultMembers = [
+    { name: "Rahul Verma", role: "Project Manager", alloc: "100%" },
+    { name: "Amit Kumar", role: "Technical Lead", alloc: "80%" },
+    { name: "Pooja Singh", role: "QA Lead", alloc: "60%" },
+    { name: "Neha Patel", role: "Business Analyst", alloc: "40%" },
+  ];
+
+  const currentList = teamList.length > 0 ? teamList : defaultMembers;
+
+  return (
+    <div className="member-table">
+      {currentList.map((x, i) => (
+        <div key={x.name + i}>
+          <b>{x.name}</b>
+          <span>{x.role}</span>
+          <input
+            value={x.alloc}
+            onChange={(e) => {
+              const val = e.target.value;
+              setTeamList((prev) => {
+                const base = prev.length > 0 ? prev : defaultMembers;
+                return base.map((item, idx) => (idx === i ? { ...item, alloc: val } : item));
+              });
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setTeamList((prev) => {
+                const base = prev.length > 0 ? prev : defaultMembers;
+                return base.filter((_, idx) => idx !== i);
+              });
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      {showPicker ? (
+        <select
+          autoFocus
+          style={{
+            height: 28,
+            fontSize: "8px",
+            borderRadius: 4,
+            border: "1px solid #dce6f1",
+            padding: "0 6px",
+            marginTop: 6,
+          }}
+          onChange={(e) => {
+            const empId = e.target.value;
+            setShowPicker(false);
+            if (!empId) return;
+            const emp = employeeOptions.find((x) => String(x._id || x.id) === String(empId));
+            if (emp) {
+              const name =
+                emp.displayName ||
+                `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
+                emp.name;
+              setTeamList((prev) => [
+                ...(prev.length > 0 ? prev : defaultMembers),
+                { name, role: "Team Member", alloc: "100%" },
+              ]);
+            }
+          }}
+          onBlur={() => setShowPicker(false)}
+        >
+          <option value="">Select Employee to Add...</option>
+          {employeeOptions.map((e) => (
+            <option key={e._id || e.id} value={e._id || e.id}>
+              {e.displayName || `${e.firstName || ""} ${e.lastName || ""}`.trim()} ({e.employeeCode || "EMP"})
+            </option>
+          ))}
+        </select>
+      ) : (
+        <button
+          className="btn outline"
+          type="button"
+          onClick={() => setShowPicker(true)}
+          style={{ alignSelf: "flex-start", marginTop: 4 }}
+        >
+          + Add Member
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ReviewStep({
+  formData,
+  clientOptions,
+  autoProjectCode,
+  go,
+}: {
+  formData: Record<string, string>;
+  clientOptions: any[];
+  autoProjectCode: string;
+  go: (n: number) => void;
+}) {
+  const sections = [
+    { title: "Identity", step: 1 },
+    { title: "Ownership", step: 2 },
+    { title: "Timeline", step: 3 },
+    { title: "Commercial", step: 4 },
+    { title: "Technology", step: 5 },
+    { title: "Governance", step: 6 },
+    { title: "Team & Access", step: 7 },
+  ];
+
+  const selectedClient = clientOptions.find(
+    (c) =>
+      String(c._id || c.id) === String(formData["Client"]) ||
+      c.displayName === formData["Client"] ||
+      c.legalName === formData["Client"]
+  );
+
+  return (
+    <div className="review-grid">
+      {sections.map(({ title, step }) => (
+        <div key={title}>
+          <div className="section-head">
+            <b>{title}</b>
+            <a onClick={() => go(step)} style={{ cursor: "pointer" }}>
+              Edit
+            </a>
+          </div>
+          <p>
+            Client: <strong>{selectedClient?.displayName || selectedClient?.legalName || formData["Client"] || "Not selected"}</strong>
+          </p>
+          <p>
+            Project: <strong>{formData["Project Name"] || "Not entered"}</strong>
+          </p>
+          <p>
+            Code: <strong>{formData["Project Code"] || autoProjectCode}</strong>
+          </p>
+          <p>
+            Status: <strong>{formData["Status"] || "Planned"}</strong>
+          </p>
+          <p style={{ color: "#7186a2", fontSize: "7px" }}>
+            All required information has been reviewed.
+          </p>
+        </div>
+      ))}
+      <div className="next-steps">
+        <b>Next Steps</b>
+        <span>1. Save Draft</span>
+        <span>2. Submit for Approval</span>
+        <span>3. Create Project</span>
+        <span>4. Project Initialisation</span>
       </div>
     </div>
   );

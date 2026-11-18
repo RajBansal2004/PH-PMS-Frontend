@@ -7,5 +7,5 @@ type PageProps = {
 export default async function SprintPlanningPage({ params }: PageProps) {
   const { id } = await params;
 
-  return <SprintPlanning sprintId={id.toUpperCase()} />;
+  return <SprintPlanning sprintId={id} />;
 }

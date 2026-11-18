@@ -494,69 +494,7 @@ export function Dashboard() {
       {/* ======================================================
           FOUNDER / MD COMMAND CENTER (BRD SECTION 83)
       ====================================================== */}
-      {data.commandCenter && (
-        <section className="card" style={{ marginBottom: "1.5rem" }}>
-          <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <b>Founder & Management Command Center</b>
-            <span style={{ fontSize: "0.8rem", color: "#059669", background: "#ecfdf5", padding: "2px 8px", borderRadius: "4px", fontWeight: "bold" }}>
-              5-Row Operational Control
-            </span>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px" }}>
-            {/* ROW 1 — PORTFOLIO */}
-            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", display: "grid", gridTemplateColumns: "140px repeat(auto-fit, minmax(100px, 1fr))", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#475569" }}>Row 1 · Portfolio</span>
-              <div><small style={{ color: "#64748b" }}>Active</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row1_portfolio.activeProjects}</div></div>
-              <div><small style={{ color: "#059669" }}>● Green</small><div style={{ fontWeight: "bold", color: "#059669" }}>{data.commandCenter.row1_portfolio.green}</div></div>
-              <div><small style={{ color: "#d97706" }}>● Amber</small><div style={{ fontWeight: "bold", color: "#d97706" }}>{data.commandCenter.row1_portfolio.amber}</div></div>
-              <div><small style={{ color: "#dc2626" }}>● Red</small><div style={{ fontWeight: "bold", color: "#dc2626" }}>{data.commandCenter.row1_portfolio.red}</div></div>
-              <div><small style={{ color: "#64748b" }}>Closures</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row1_portfolio.upcomingClosures}</div></div>
-              <div><small style={{ color: "#64748b" }}>Contract Value</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row1_portfolio.totalContractValue}</div></div>
-            </div>
-
-            {/* ROW 2 — DELIVERY */}
-            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", display: "grid", gridTemplateColumns: "140px repeat(auto-fit, minmax(100px, 1fr))", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#475569" }}>Row 2 · Delivery</span>
-              <div><small style={{ color: "#dc2626" }}>Overdue Tasks</small><div style={{ fontWeight: "bold", color: data.commandCenter.row2_delivery.overdueTasks > 0 ? "#dc2626" : "#1e293b" }}>{data.commandCenter.row2_delivery.overdueTasks}</div></div>
-              <div><small style={{ color: "#dc2626" }}>Critical Bugs</small><div style={{ fontWeight: "bold", color: data.commandCenter.row2_delivery.criticalBugs > 0 ? "#dc2626" : "#1e293b" }}>{data.commandCenter.row2_delivery.criticalBugs}</div></div>
-              <div><small style={{ color: "#64748b" }}>Blocked</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row2_delivery.blockedTasks}</div></div>
-              <div><small style={{ color: "#64748b" }}>Pending UAT</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row2_delivery.pendingUat}</div></div>
-              <div><small style={{ color: "#64748b" }}>Deployments</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row2_delivery.upcomingDeployments}</div></div>
-            </div>
-
-            {/* ROW 3 — PEOPLE */}
-            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", display: "grid", gridTemplateColumns: "140px repeat(auto-fit, minmax(100px, 1fr))", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#475569" }}>Row 3 · People</span>
-              <div><small style={{ color: "#64748b" }}>Total Resources</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row3_people.totalResources}</div></div>
-              <div><small style={{ color: "#64748b" }}>Allocated</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row3_people.allocated}</div></div>
-              <div><small style={{ color: "#64748b" }}>Bench</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row3_people.availableBench}</div></div>
-              <div><small style={{ color: "#dc2626" }}>Overallocated (&gt;100%)</small><div style={{ fontWeight: "bold", color: data.commandCenter.row3_people.overallocated > 0 ? "#dc2626" : "#059669" }}>{data.commandCenter.row3_people.overallocated}</div></div>
-              <div><small style={{ color: "#64748b" }}>Utilization</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row3_people.utilizationRate}</div></div>
-            </div>
-
-            {/* ROW 4 — COMMERCIAL */}
-            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", display: "grid", gridTemplateColumns: "140px repeat(auto-fit, minmax(100px, 1fr))", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#475569" }}>Row 4 · Commercial</span>
-              <div><small style={{ color: "#64748b" }}>Contract Value</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row4_commercial.contractValue}</div></div>
-              <div><small style={{ color: "#64748b" }}>Current Billing</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row4_commercial.currentBilling}</div></div>
-              <div><small style={{ color: "#64748b" }}>Receivables</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row4_commercial.receivable}</div></div>
-              <div><small style={{ color: "#d97706" }}>Overdue Invoices</small><div style={{ fontWeight: "bold", color: "#d97706" }}>{data.commandCenter.row4_commercial.overdue}</div></div>
-              <div><small style={{ color: "#059669" }}>Contribution Margin</small><div style={{ fontWeight: "bold", color: "#059669" }}>{data.commandCenter.row4_commercial.contributionMargin}</div></div>
-            </div>
-
-            {/* ROW 5 — INTELLIGENCE */}
-            <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: "8px", display: "grid", gridTemplateColumns: "140px repeat(auto-fit, minmax(100px, 1fr))", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#475569" }}>Row 5 · Intelligence</span>
-              <div><small style={{ color: "#64748b" }}>Active Risks</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row5_intelligence.topRisksCount}</div></div>
-              <div><small style={{ color: "#64748b" }}>Decisions</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row5_intelligence.pendingDecisionsCount}</div></div>
-              <div><small style={{ color: "#64748b" }}>Conflicts</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row5_intelligence.resourceConflicts}</div></div>
-              <div><small style={{ color: "#64748b" }}>Client Delays</small><div style={{ fontWeight: "bold" }}>{data.commandCenter.row5_intelligence.clientDelaysCount}</div></div>
-              <div style={{ gridColumn: "span 2" }}><small style={{ color: "#64748b" }}>AI Delivery Forecast</small><div style={{ fontSize: "0.8rem", fontWeight: "500", color: "#1e293b" }}>{data.commandCenter.row5_intelligence.aiForecast}</div></div>
-            </div>
-          </div>
-        </section>
-      )}
+    
 
       {/* ======================================================
           KPI GRID
